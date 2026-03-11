@@ -20,6 +20,8 @@ const ROLES = {
   VIEWER: 'viewer',
 };
 
+const CREATABLE_ROLES = [ROLES.ADMIN, ROLES.CREATOR];
+
 const canDeleteUser = (currentUser, targetUser) => {
   const currentRole = normalizeAccessRole(currentUser?.role);
   const targetRole = normalizeAccessRole(targetUser?.role);
@@ -31,7 +33,7 @@ const canDeleteUser = (currentUser, targetUser) => {
 
   // Admin can delete only creator.
   if (currentRole === ROLES.ADMIN) {
-    return targetRole === ROLES.CREATOR || targetRole === ROLES.VIEWER;
+    return targetRole === ROLES.CREATOR;
   }
 
   // Creator and others cannot delete.
@@ -45,7 +47,7 @@ const getUsers = async (req, res) => {
     let query = {};
 
     if (requesterRole === ROLES.ADMIN) {
-      query = { role: { $in: [ROLES.ADMIN, ROLES.CREATOR, ROLES.VIEWER] } };
+      query = { role: { $in: [ROLES.ADMIN, ROLES.CREATOR] } };
     } else if (requesterRole === ROLES.CREATOR) {
       query = requesterId ? { _id: requesterId } : { _id: null };
     } else if (requesterRole !== ROLES.SUPERADMIN) {
@@ -78,28 +80,18 @@ const getRequesterRoleFromAuthHeader = (req) => {
 
 const canCreateOnboardingRole = ({ requesterRole, targetRole, hasValidInvitationToken }) => {
   if (hasValidInvitationToken) {
-    return [
-      ROLES.SUPERADMIN,
-      ROLES.ADMIN,
-      ROLES.CREATOR,
-      ROLES.VIEWER,
-    ].includes(targetRole);
+    return CREATABLE_ROLES.includes(targetRole);
   }
 
   if (requesterRole === ROLES.SUPERADMIN) {
-    return [
-      ROLES.SUPERADMIN,
-      ROLES.ADMIN,
-      ROLES.CREATOR,
-      ROLES.VIEWER,
-    ].includes(targetRole);
+    return CREATABLE_ROLES.includes(targetRole);
   }
 
   if (requesterRole === ROLES.ADMIN) {
-    return targetRole === ROLES.CREATOR || targetRole === ROLES.VIEWER;
+    return CREATABLE_ROLES.includes(targetRole);
   }
 
-  return targetRole === ROLES.CREATOR || targetRole === ROLES.VIEWER;
+  return targetRole === ROLES.CREATOR;
 };
 
 const createUser = async (req, res) => {
@@ -109,6 +101,10 @@ const createUser = async (req, res) => {
     // Normalize role to valid enum values
     const normalizedRole = normalizeRole(role);
     console.log('CreateUser: Role normalized from', role, 'to', normalizedRole);
+
+    if (!CREATABLE_ROLES.includes(normalizedRole)) {
+      return res.status(400).json({ message: 'Only admin and creator roles can be created.' });
+    }
 
     // Validate mobile number format (basic validation for Indian numbers)
     const phoneRegex = /^[5-9]\d{9}$/;
@@ -307,6 +303,10 @@ const createToken = async (req, res) => {
     // Normalize role before storing
     const normalizedRole = normalizeRole(role);
     console.log('CreateToken: Role normalized from', role, 'to', normalizedRole);
+
+    if (!CREATABLE_ROLES.includes(normalizedRole)) {
+      return res.status(400).json({ message: 'Only admin and creator roles can be invited.' });
+    }
 
     const token = randomUUID();
     onboardingTokens[token] = {
