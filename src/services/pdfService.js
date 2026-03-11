@@ -222,7 +222,7 @@ function buildCertificateHTML(data) {
         }
         
         .kpm {
-          left: 320px;
+          left: 450px;
           top: 835px;
           width: 250px;
           height: 50px;
@@ -231,33 +231,35 @@ function buildCertificateHTML(data) {
         }
         
         .name {
-          left: 640px;
-          top: 1110px;
+          left: 697px;
+          top: 1080px;
           width: 550px;
           height: 80px;
           font-size: 52px;
           justify-content: center;
+          text-align: center;
         }
         
         .semester {
-          left: 470px;
-          top: 1265px;
+          left: 360px;
+          top: 1240px;
           width: 120px;
           height: 60px;
           justify-content: center;
         }
         
         .department {
-          left: 790px;
-          top: 1248px;
+          left: 697px;
+          top: 1230px;
           width: 360px;
           height: 60px;
           justify-content: center;
+          text-align: center;
         }
         
         .competition {
           left: 675px;
-          top: 1350px;
+          top: 1320px;
           width: 360px;
           height: 60px;
           font-size: 28px;
@@ -266,18 +268,19 @@ function buildCertificateHTML(data) {
         
         .year {
           left: 1040px;
-          top: 1460px;
+          top: 1430px;
           width: 220px;
           height: 60px;
           justify-content: center;
         }
         
         .position {
-          left: 770px;
-          top: 1575px;
+          left: 697px;
+          top: 1530px;
           width: 230px;
           height: 60px;
           justify-content: center;
+          text-align: center;
         }
         
         .qr-code {
