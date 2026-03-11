@@ -1,5 +1,7 @@
 const Home = require('../models/home.model');
 const Player = require('../models/player.model');
+const Result = require('../models/result.model');
+const GroupResult = require('../models/groupResult.model');
 const KpmPool = require('../models/kpmPool.model');
 const cloudinary = require('../config/cloudinary');
 const multer = require('multer');
@@ -8,6 +10,123 @@ const { assignGlobalKpms, syncKpmPoolFromDocs } = require('../services/kpmSequen
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
+const PRIZE_MEDALS = ['Gold', 'Silver', 'Bronze'];
+
+const normalizeAchievementSettings = (settings = {}) => ({
+  sportsMeetsConducted: String(settings?.sportsMeetsConducted || '').trim(),
+  yearsOfExcellence: String(settings?.yearsOfExcellence || '').trim(),
+});
+
+const extractLegacyAchievementValue = (achievements = [], title = '') => {
+  const expectedTitle = String(title || '').trim().toLowerCase();
+  if (!expectedTitle) return '';
+
+  const item = (Array.isArray(achievements) ? achievements : []).find((entry) => {
+    const normalizedTitle = String(entry?.title || '').trim().toLowerCase();
+    return normalizedTitle === expectedTitle || normalizedTitle.includes(expectedTitle);
+  });
+
+  return String(item?.value || '').trim();
+};
+
+const deriveAchievementSettings = (home) => {
+  const normalizedSettings = normalizeAchievementSettings(home?.achievementSettings || {});
+  const legacyAchievements = Array.isArray(home?.achievements) ? home.achievements : [];
+
+  return {
+    sportsMeetsConducted:
+      normalizedSettings.sportsMeetsConducted ||
+      extractLegacyAchievementValue(legacyAchievements, 'sports meets conducted'),
+    yearsOfExcellence:
+      normalizedSettings.yearsOfExcellence ||
+      extractLegacyAchievementValue(legacyAchievements, 'years of excellence'),
+  };
+};
+
+const getAchievementDisplayYear = async () => {
+  const currentYear = new Date().getFullYear();
+  const [resultYears, groupResultYears, playerYears] = await Promise.all([
+    Result.distinct('year'),
+    GroupResult.distinct('year'),
+    Player.distinct('year'),
+  ]);
+
+  const availableYears = Array.from(
+    new Set(
+      [...resultYears, ...groupResultYears, ...playerYears]
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0),
+    ),
+  ).sort((left, right) => right - left);
+
+  return {
+    currentYear,
+    availableYears,
+    displayYear: availableYears.includes(currentYear) ? currentYear : (availableYears[0] || currentYear),
+  };
+};
+
+const getAutomaticAchievementMetrics = async () => {
+  const { currentYear, displayYear, availableYears } = await getAchievementDisplayYear();
+
+  if (availableYears.length === 0) {
+    return {
+      currentYear,
+      displayYear,
+      totalPrizesWon: 0,
+      activePlayers: 0,
+      hasAnyData: false,
+      usingFallbackYear: false,
+    };
+  }
+
+  const [individualPrizes, groupPrizes, activePlayers, playersForYear] = await Promise.all([
+    Result.countDocuments({ year: displayYear, medal: { $in: PRIZE_MEDALS } }),
+    GroupResult.countDocuments({ year: displayYear, medal: { $in: PRIZE_MEDALS } }),
+    Player.countDocuments({ year: displayYear, status: 'ACTIVE' }),
+    Player.countDocuments({ year: displayYear }),
+  ]);
+
+  return {
+    currentYear,
+    displayYear,
+    totalPrizesWon: individualPrizes + groupPrizes,
+    activePlayers: activePlayers > 0 ? activePlayers : playersForYear,
+    hasAnyData: true,
+    usingFallbackYear: displayYear !== currentYear,
+  };
+};
+
+const buildHomeAchievements = (settings, metrics) => ([
+  {
+    key: 'totalPrizesWon',
+    title: 'Total Prizes Won',
+    value: String(metrics?.totalPrizesWon ?? 0),
+    icon: 'trophy',
+    mode: 'auto',
+  },
+  {
+    key: 'activePlayers',
+    title: 'Active Players',
+    value: String(metrics?.activePlayers ?? 0),
+    icon: 'users',
+    mode: 'auto',
+  },
+  {
+    key: 'sportsMeetsConducted',
+    title: 'Sports Meets Conducted',
+    value: String(settings?.sportsMeetsConducted || '0'),
+    icon: 'calendar',
+    mode: 'manual',
+  },
+  {
+    key: 'yearsOfExcellence',
+    title: 'Years of Excellence',
+    value: String(settings?.yearsOfExcellence || '0'),
+    icon: 'medal',
+    mode: 'manual',
+  },
+]);
 
 const mapPlayersToGroupedResponse = (players) => {
   return (players || []).reduce((acc, player) => {
@@ -52,7 +171,22 @@ exports.getHome = async (req, res) => {
       home = new Home();
       await home.save();
     }
-    res.json(home);
+
+    const achievementSettings = deriveAchievementSettings(home);
+    const achievementMetrics = await getAutomaticAchievementMetrics();
+    const response = home.toObject();
+
+    response.achievementSettings = achievementSettings;
+    response.achievementDisplayYear = achievementMetrics.displayYear;
+    response.achievementDataStatus = {
+      currentYear: achievementMetrics.currentYear,
+      displayYear: achievementMetrics.displayYear,
+      hasAnyData: achievementMetrics.hasAnyData,
+      usingFallbackYear: achievementMetrics.usingFallbackYear,
+    };
+    response.achievements = buildHomeAchievements(achievementSettings, achievementMetrics);
+
+    res.json(response);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -66,6 +200,7 @@ exports.updateHome = async (req, res) => {
       heroSubtitle, 
       heroButtons, 
       banners, 
+      achievementSettings,
       achievements, 
       sportsCategories, 
       gallery, 
@@ -94,6 +229,14 @@ exports.updateHome = async (req, res) => {
     if (heroSubtitle !== undefined) home.heroSubtitle = heroSubtitle;
     if (heroButtons !== undefined) home.heroButtons = heroButtons;
     if (banners !== undefined) home.banners = banners;
+    if (achievementSettings !== undefined) {
+      home.achievementSettings = normalizeAchievementSettings(achievementSettings);
+    } else if (achievements !== undefined) {
+      home.achievementSettings = normalizeAchievementSettings({
+        sportsMeetsConducted: extractLegacyAchievementValue(achievements, 'sports meets conducted'),
+        yearsOfExcellence: extractLegacyAchievementValue(achievements, 'years of excellence'),
+      });
+    }
     if (achievements !== undefined) home.achievements = achievements;
     if (sportsCategories !== undefined) home.sportsCategories = sportsCategories;
     if (gallery !== undefined) home.gallery = gallery;

@@ -46,6 +46,16 @@ const homeSchema = new mongoose.Schema({
       default: ''
     }
   }],
+  achievementSettings: {
+    sportsMeetsConducted: {
+      type: String,
+      default: ''
+    },
+    yearsOfExcellence: {
+      type: String,
+      default: ''
+    }
+  },
   // Sports Categories
   sportsCategories: [{
     name: {
