@@ -12,6 +12,16 @@ const winnerSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    teamName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    branch: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     medal: {
       type: String,
       enum: ['Gold', 'Silver', 'Bronze'],

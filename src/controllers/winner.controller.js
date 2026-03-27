@@ -9,6 +9,8 @@ const CAPTURE_SESSION_TTL_MS = 15 * 60 * 1000;
 const normalizeWinnerPayload = (payload = {}) => ({
   eventName: String(payload.eventName || '').trim(),
   playerName: String(payload.playerName || '').trim(),
+  teamName: String(payload.teamName || '').trim(),
+  branch: String(payload.branch || '').trim(),
   medal: String(payload.medal || '').trim(),
   imageUrl: String(payload.imageUrl || '').trim(),
   imagePublicId: String(payload.imagePublicId || '').trim(),
@@ -273,6 +275,8 @@ exports.updateWinner = async (req, res) => {
     const payload = normalizeWinnerPayload({
       eventName: req.body.eventName ?? winner.eventName,
       playerName: req.body.playerName ?? winner.playerName,
+      teamName: req.body.teamName ?? winner.teamName,
+      branch: req.body.branch ?? winner.branch,
       medal: req.body.medal ?? winner.medal,
       imageUrl: req.body.imageUrl ?? winner.imageUrl,
       imagePublicId: req.body.imagePublicId ?? winner.imagePublicId,
@@ -288,6 +292,8 @@ exports.updateWinner = async (req, res) => {
 
     winner.eventName = payload.eventName;
     winner.playerName = payload.playerName;
+    winner.teamName = payload.teamName;
+    winner.branch = payload.branch;
     winner.medal = payload.medal;
     winner.imageUrl = payload.imageUrl;
     winner.imagePublicId = nextImagePublicId;
