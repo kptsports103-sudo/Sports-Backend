@@ -15,6 +15,12 @@ const memberSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  branch: {
+    type: String,
+    required: false,
+    trim: true,
+    default: ''
+  },
   diplomaYear: {
     type: Number,
     required: false,

@@ -1,17 +1,36 @@
 const crypto = require('crypto');
 const cloudinary = require('../config/cloudinary');
+const Result = require('../models/result.model');
+const GroupResult = require('../models/groupResult.model');
+const Player = require('../models/player.model');
 const Winner = require('../models/winner.model');
 const WinnerCaptureSession = require('../models/winnerCaptureSession.model');
 
 const ALLOWED_MEDALS = ['Gold', 'Silver', 'Bronze'];
+const ALLOWED_LINK_TYPES = ['manual', 'individual', 'team'];
 const CAPTURE_SESSION_TTL_MS = 15 * 60 * 1000;
+
+const createValidationError = (message) => {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+};
+
+const normalizeWinnerYear = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 const normalizeWinnerPayload = (payload = {}) => ({
   eventName: String(payload.eventName || '').trim(),
   playerName: String(payload.playerName || '').trim(),
   teamName: String(payload.teamName || '').trim(),
   branch: String(payload.branch || '').trim(),
+  year: normalizeWinnerYear(payload.year),
   medal: String(payload.medal || '').trim(),
+  linkedResultType: String(payload.linkedResultType || 'manual').trim().toLowerCase() || 'manual',
+  linkedResultId: String(payload.linkedResultId || '').trim(),
   imageUrl: String(payload.imageUrl || '').trim(),
   imagePublicId: String(payload.imagePublicId || '').trim(),
 });
@@ -19,14 +38,202 @@ const normalizeWinnerPayload = (payload = {}) => ({
 const validateWinnerPayload = (payload) => {
   const errors = [];
 
-  if (!payload.eventName) errors.push('eventName is required.');
   if (!payload.playerName) errors.push('playerName is required.');
   if (!payload.imageUrl) errors.push('imageUrl is required.');
+  if (!ALLOWED_LINK_TYPES.includes(payload.linkedResultType)) {
+    errors.push(`linkedResultType must be one of: ${ALLOWED_LINK_TYPES.join(', ')}.`);
+  }
+  if (payload.linkedResultType === 'manual' && !payload.eventName) {
+    errors.push('eventName is required.');
+  }
+  if (payload.linkedResultType !== 'manual' && !payload.linkedResultId) {
+    errors.push('linkedResultId is required for linked winners.');
+  }
   if (!ALLOWED_MEDALS.includes(payload.medal)) {
     errors.push(`medal must be one of: ${ALLOWED_MEDALS.join(', ')}.`);
   }
 
   return errors;
+};
+
+const getGroupLeadName = (groupResult) => {
+  const firstNamedMember = (Array.isArray(groupResult?.members) ? groupResult.members : []).find(
+    (member) => String(member?.name || '').trim()
+  );
+  return String(firstNamedMember?.name || groupResult?.teamName || '').trim();
+};
+
+const buildPlayerBranchLookup = async (groupResults) => {
+  const masterIds = new Set();
+  const playerIds = new Set();
+
+  (groupResults || []).forEach((groupResult) => {
+    (Array.isArray(groupResult?.members) ? groupResult.members : []).forEach((member) => {
+      const masterId = String(member?.playerMasterId || '').trim();
+      const playerId = String(member?.playerId || '').trim();
+      if (masterId) masterIds.add(masterId);
+      if (playerId) playerIds.add(playerId);
+    });
+  });
+
+  if (masterIds.size === 0 && playerIds.size === 0) {
+    return new Map();
+  }
+
+  const players = await Player.find({
+    $or: [
+      { masterId: { $in: Array.from(masterIds) } },
+      { playerId: { $in: Array.from(playerIds) } },
+    ],
+  })
+    .sort({ year: -1, updatedAt: -1, createdAt: -1 })
+    .lean();
+
+  const lookup = new Map();
+  players.forEach((player) => {
+    const branch = String(player?.branch || '').trim();
+    if (!branch) return;
+
+    const masterId = String(player?.masterId || '').trim();
+    const playerId = String(player?.playerId || '').trim();
+
+    if (masterId && !lookup.has(`master:${masterId}`)) {
+      lookup.set(`master:${masterId}`, branch);
+    }
+    if (playerId && !lookup.has(`player:${playerId}`)) {
+      lookup.set(`player:${playerId}`, branch);
+    }
+  });
+
+  return lookup;
+};
+
+const resolveGroupBranch = (groupResult, playerLookup) => {
+  const branches = Array.from(
+    new Set(
+      (Array.isArray(groupResult?.members) ? groupResult.members : [])
+        .map((member) => {
+          const directBranch = String(member?.branch || '').trim();
+          if (directBranch) return directBranch;
+
+          const masterId = String(member?.playerMasterId || '').trim();
+          const playerId = String(member?.playerId || '').trim();
+
+          return (
+            playerLookup.get(`master:${masterId}`) ||
+            playerLookup.get(`player:${playerId}`) ||
+            ''
+          );
+        })
+        .filter(Boolean)
+    )
+  );
+
+  if (branches.length === 1) return branches[0];
+  if (branches.length > 1) return String(groupResult?.teamName || 'Mixed Team').trim();
+  return String(groupResult?.teamName || '').trim();
+};
+
+const buildWinnerFromLinkedResult = async (payload) => {
+  if (payload.linkedResultType === 'manual' || !payload.linkedResultId) {
+    return payload;
+  }
+
+  if (payload.linkedResultType === 'individual') {
+    const linkedResult = await Result.findById(payload.linkedResultId).lean();
+    if (!linkedResult) {
+      throw createValidationError('Linked individual result not found.');
+    }
+    if (!ALLOWED_MEDALS.includes(linkedResult.medal)) {
+      throw createValidationError('Only Gold, Silver, or Bronze results can be linked to winners.');
+    }
+
+    return {
+      ...payload,
+      eventName: String(linkedResult.event || '').trim(),
+      playerName: payload.playerName || String(linkedResult.name || '').trim(),
+      teamName: '',
+      branch: String(linkedResult.branch || '').trim(),
+      year: Number(linkedResult.year) || null,
+      medal: String(linkedResult.medal || '').trim(),
+    };
+  }
+
+  const linkedGroupResult = await GroupResult.findById(payload.linkedResultId).lean();
+  if (!linkedGroupResult) {
+    throw createValidationError('Linked team result not found.');
+  }
+  if (!ALLOWED_MEDALS.includes(linkedGroupResult.medal)) {
+    throw createValidationError('Only Gold, Silver, or Bronze team results can be linked to winners.');
+  }
+
+  const playerLookup = await buildPlayerBranchLookup([linkedGroupResult]);
+
+  return {
+    ...payload,
+    eventName: String(linkedGroupResult.event || '').trim(),
+    playerName: payload.playerName || getGroupLeadName(linkedGroupResult),
+    teamName: String(linkedGroupResult.teamName || '').trim(),
+    branch: resolveGroupBranch(linkedGroupResult, playerLookup) || payload.branch,
+    year: Number(linkedGroupResult.year) || null,
+    medal: String(linkedGroupResult.medal || '').trim(),
+  };
+};
+
+const hydrateLinkedWinners = async (winners) => {
+  const safeWinners = Array.isArray(winners) ? winners : [];
+  const individualIds = safeWinners
+    .filter((winner) => winner?.linkedResultType === 'individual' && winner?.linkedResultId)
+    .map((winner) => winner.linkedResultId);
+  const teamIds = safeWinners
+    .filter((winner) => winner?.linkedResultType === 'team' && winner?.linkedResultId)
+    .map((winner) => winner.linkedResultId);
+
+  const [individualResults, teamResults] = await Promise.all([
+    individualIds.length ? Result.find({ _id: { $in: individualIds } }).lean() : [],
+    teamIds.length ? GroupResult.find({ _id: { $in: teamIds } }).lean() : [],
+  ]);
+
+  const teamPlayerLookup = await buildPlayerBranchLookup(teamResults);
+  const individualMap = new Map(individualResults.map((result) => [String(result._id), result]));
+  const teamMap = new Map(teamResults.map((result) => [String(result._id), result]));
+
+  return safeWinners.map((winner) => {
+    const linkedType = String(winner?.linkedResultType || 'manual').trim().toLowerCase();
+    const linkedId = String(winner?.linkedResultId || '').trim();
+
+    if (linkedType === 'individual' && linkedId && individualMap.has(linkedId)) {
+      const linkedResult = individualMap.get(linkedId);
+      if (ALLOWED_MEDALS.includes(linkedResult?.medal)) {
+        return {
+          ...winner,
+          eventName: String(linkedResult.event || winner.eventName || '').trim(),
+          playerName: String(winner.playerName || linkedResult.name || '').trim(),
+          teamName: '',
+          branch: String(linkedResult.branch || winner.branch || '').trim(),
+          year: Number(linkedResult.year) || winner.year || null,
+          medal: String(linkedResult.medal || winner.medal || '').trim(),
+        };
+      }
+    }
+
+    if (linkedType === 'team' && linkedId && teamMap.has(linkedId)) {
+      const linkedResult = teamMap.get(linkedId);
+      if (ALLOWED_MEDALS.includes(linkedResult?.medal)) {
+        return {
+          ...winner,
+          eventName: String(linkedResult.event || winner.eventName || '').trim(),
+          playerName: String(winner.playerName || getGroupLeadName(linkedResult) || '').trim(),
+          teamName: String(linkedResult.teamName || winner.teamName || '').trim(),
+          branch: resolveGroupBranch(linkedResult, teamPlayerLookup) || String(winner.branch || '').trim(),
+          year: Number(linkedResult.year) || winner.year || null,
+          medal: String(linkedResult.medal || winner.medal || '').trim(),
+        };
+      }
+    }
+
+    return winner;
+  });
 };
 
 const destroyWinnerImage = async (publicId) => {
@@ -239,7 +446,8 @@ exports.getWinners = async (req, res) => {
     if (limit) query.limit(limit);
 
     const winners = await query.lean();
-    res.json(winners);
+    const hydratedWinners = await hydrateLinkedWinners(winners);
+    res.json(hydratedWinners);
   } catch (error) {
     console.error('Error fetching winners:', error);
     res.status(500).json({ message: 'Server error' });
@@ -248,7 +456,8 @@ exports.getWinners = async (req, res) => {
 
 exports.createWinner = async (req, res) => {
   try {
-    const payload = normalizeWinnerPayload(req.body);
+    const normalizedPayload = normalizeWinnerPayload(req.body);
+    const payload = await buildWinnerFromLinkedResult(normalizedPayload);
     const errors = validateWinnerPayload(payload);
 
     if (errors.length > 0) {
@@ -261,6 +470,9 @@ exports.createWinner = async (req, res) => {
     res.status(201).json(winner);
   } catch (error) {
     console.error('Error creating winner:', error);
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -272,15 +484,19 @@ exports.updateWinner = async (req, res) => {
       return res.status(404).json({ message: 'Winner not found' });
     }
 
-    const payload = normalizeWinnerPayload({
+    const normalizedPayload = normalizeWinnerPayload({
       eventName: req.body.eventName ?? winner.eventName,
       playerName: req.body.playerName ?? winner.playerName,
       teamName: req.body.teamName ?? winner.teamName,
       branch: req.body.branch ?? winner.branch,
+      year: req.body.year ?? winner.year,
       medal: req.body.medal ?? winner.medal,
+      linkedResultType: req.body.linkedResultType ?? winner.linkedResultType,
+      linkedResultId: req.body.linkedResultId ?? winner.linkedResultId,
       imageUrl: req.body.imageUrl ?? winner.imageUrl,
       imagePublicId: req.body.imagePublicId ?? winner.imagePublicId,
     });
+    const payload = await buildWinnerFromLinkedResult(normalizedPayload);
     const errors = validateWinnerPayload(payload);
 
     if (errors.length > 0) {
@@ -294,7 +510,10 @@ exports.updateWinner = async (req, res) => {
     winner.playerName = payload.playerName;
     winner.teamName = payload.teamName;
     winner.branch = payload.branch;
+    winner.year = payload.year;
     winner.medal = payload.medal;
+    winner.linkedResultType = payload.linkedResultType;
+    winner.linkedResultId = payload.linkedResultId;
     winner.imageUrl = payload.imageUrl;
     winner.imagePublicId = nextImagePublicId;
 
@@ -307,6 +526,9 @@ exports.updateWinner = async (req, res) => {
     res.json(winner);
   } catch (error) {
     console.error('Error updating winner:', error);
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };

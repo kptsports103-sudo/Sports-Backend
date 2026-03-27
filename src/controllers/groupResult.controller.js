@@ -13,7 +13,8 @@ const normalizeGroupPayload = (raw = {}) => {
       return {
         ...member,
         playerMasterId: masterId || undefined,
-        playerId: legacyId || undefined
+        playerId: legacyId || undefined,
+        branch: String(member.branch || '').trim()
       };
     })
     .filter(Boolean);

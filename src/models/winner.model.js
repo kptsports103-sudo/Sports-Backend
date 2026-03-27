@@ -22,10 +22,25 @@ const winnerSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    year: {
+      type: Number,
+      default: null,
+    },
     medal: {
       type: String,
       enum: ['Gold', 'Silver', 'Bronze'],
       required: true,
+    },
+    linkedResultType: {
+      type: String,
+      enum: ['manual', 'individual', 'team'],
+      default: 'manual',
+      trim: true,
+    },
+    linkedResultId: {
+      type: String,
+      default: '',
+      trim: true,
     },
     imageUrl: {
       type: String,
