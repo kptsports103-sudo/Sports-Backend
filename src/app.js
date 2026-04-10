@@ -26,6 +26,7 @@ const visitorRoutes = require('../routes/visitor.routes');
 const adminActivityLogRoutes = require('./routes/adminActivityLog.routes');
 const mediaRoutes = require('./routes/media.routes');
 const metricsRoutes = require('./routes/metrics.routes');
+const attendanceRoutes = require('./routes/attendance.routes');
 
 const errorMiddleware = require('./middlewares/error.middleware');
 
@@ -101,6 +102,27 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
+const routeMounts = [
+  ['/auth', authRoutes],
+  ['/iam', iamRoutes],
+  ['/home', homeRoutes],
+  ['/me', meRoutes],
+  ['/events', eventRoutes],
+  ['/registrations', registrationRoutes],
+  ['/galleries', galleryRoutes],
+  ['/results', resultRoutes],
+  ['/group-results', groupResultRoutes],
+  ['/winners', winnerRoutes],
+  ['/upload', uploadRoutes],
+  ['/certificates', certificateRoutes],
+  ['/admin-activity', adminActivityLogRoutes],
+  ['/media', mediaRoutes],
+  ['/metrics', metricsRoutes],
+  ['/attendance', attendanceRoutes],
+];
+
+const dbGuardPaths = ['/api', ...routeMounts.map(([path]) => path)];
+
 /* ------------- Middleware ------------ */
 app.use(helmet());
 app.use(morgan('dev'));
@@ -153,7 +175,7 @@ app.get('/favicon.png', (_, res) => res.status(204).end());
 
 /* -------------- API Routes with DB Guard ----------- */
 // Database readiness guard - await connection for API routes
-app.use('/api', async (req, res, next) => {
+app.use(dbGuardPaths, async (req, res, next) => {
   if (req.method === 'OPTIONS') {
     return next();
   }
@@ -171,22 +193,16 @@ app.use('/api', async (req, res, next) => {
   }
 });
 
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/iam', iamRoutes);
-app.use('/api/v1/home', homeRoutes);
-app.use('/api/v1/me', meRoutes);
-app.use('/api/v1/events', eventRoutes);
-app.use('/api/v1/registrations', registrationRoutes);
-app.use('/api/v1/galleries', galleryRoutes);
-app.use('/api/v1/results', resultRoutes);
-app.use('/api/v1/group-results', groupResultRoutes);
-app.use('/api/v1/winners', winnerRoutes);
-app.use('/api/v1/upload', uploadRoutes);
-app.use('/api/v1/certificates', certificateRoutes);
 app.use('/api/visitor', visitorRoutes);
-app.use('/api/v1/admin-activity', adminActivityLogRoutes);
-app.use('/api/v1/media', mediaRoutes);
-app.use('/api/v1/metrics', metricsRoutes);
+routeMounts.forEach(([path, router]) => {
+  app.use(`/api/v1${path}`, router);
+});
+
+// Compatibility aliases for deployments configured with a backend origin
+// instead of the full /api/v1 base URL.
+routeMounts.forEach(([path, router]) => {
+  app.use(path, router);
+});
 
 /* -------------- Errors --------------- */
 app.use(errorMiddleware);
