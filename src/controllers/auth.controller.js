@@ -5,6 +5,18 @@ const User = require('../models/user.model');
 const jwt = require('jsonwebtoken');
 const { createActivityLogEntry } = require('../services/activityLog.service');
 
+const classifyAuthStatus = (error) => {
+  if (error?.statusCode) {
+    return error.statusCode;
+  }
+
+  if (['ECONNRESET', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EPIPE', 'EMAIL_SEND_FAILED'].includes(error?.code)) {
+    return 503;
+  }
+
+  return 400;
+};
+
 const logSuccessfulLogin = async (req, user, details = 'Successful login') => {
   if (!user?.id && !user?._id) return;
 
@@ -31,44 +43,48 @@ const logSuccessfulLogin = async (req, user, details = 'Successful login') => {
 
 exports.login = async (req, res) => {
   const { email, password, role } = req.body;
-  console.log('=== CONTROLLER LOGIN ===');
-  console.log('Request body:', req.body);
-  console.log('Email:', email);
-  console.log('Password provided:', !!password);
-  console.log('Role:', role);
-  console.log('Content-Type:', req.get('Content-Type'));
+  console.log('[auth] login request:', {
+    email: String(email || '').trim().toLowerCase(),
+    role: role || null,
+    hasPassword: Boolean(password),
+    contentType: req.get('Content-Type'),
+  });
   
   try {
     const result = await loginUser(email, password, role);
-    console.log('Login result:', result);
     if (result?.token && result?.user) {
       await logSuccessfulLogin(req, result.user, 'Successful direct login');
     }
     res.json(result);
   } catch (error) {
-    console.error('=== LOGIN ERROR ===');
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    res.status(error.statusCode || 400).json({ message: error.message || 'Server error' });
+    console.error('[auth] login error:', {
+      code: error?.code || null,
+      statusCode: error?.statusCode || null,
+      message: error?.message || 'Server error',
+    });
+    res.status(classifyAuthStatus(error)).json({ message: error.message || 'Server error' });
   }
 };
 
 exports.verifyOTP = async (req, res) => {
   const { email, otp } = req.body;
-  console.log('=== CONTROLLER VERIFY OTP ===');
-  console.log('Request body:', req.body);
-  console.log('Email:', email);
-  console.log('OTP:', otp);
-  console.log('Content-Type:', req.get('Content-Type'));
+  console.log('[auth] verify OTP request:', {
+    email: String(email || '').trim().toLowerCase(),
+    hasOtp: Boolean(otp),
+    contentType: req.get('Content-Type'),
+  });
   
   try {
     const result = await verifyUserOTP(email, otp);
-    console.log('Verify OTP result:', result);
     await logSuccessfulLogin(req, result?.user, 'Successful OTP login');
     res.json(result);
   } catch (error) {
-    console.error(error);
-    res.status(400).json({ message: error.message || 'Server error' });
+    console.error('[auth] verify OTP error:', {
+      code: error?.code || null,
+      statusCode: error?.statusCode || null,
+      message: error?.message || 'Server error',
+    });
+    res.status(classifyAuthStatus(error)).json({ message: error.message || 'Server error' });
   }
 };
 
