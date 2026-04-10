@@ -31,6 +31,16 @@ const errorMiddleware = require('./middlewares/error.middleware');
 
 const app = express();
 
+const summarizeDbError = (error) => ({
+  code: error?.code || null,
+  errno: error?.errno || null,
+  sqlState: error?.sqlState || null,
+  syscall: error?.syscall || null,
+  address: error?.address || null,
+  port: error?.port || null,
+  message: error?.message || 'Unknown database error',
+});
+
 const trimTrailingSlash = (value = '') => String(value || '').trim().replace(/\/+$/, '');
 
 const defaultAllowedOrigins = [
@@ -125,12 +135,13 @@ app.get('/health/db', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('DB health check failed:', error);
+    console.error('DB health check failed:', summarizeDbError(error));
     res.status(503).json({
       status: 'error',
       db: 'mysql',
       message: 'Database unavailable',
-      error: error.message,
+      code: error?.code || null,
+      error: error?.message || 'Unknown database error',
       timestamp: new Date().toISOString()
     });
   }
@@ -151,6 +162,7 @@ app.use('/api', async (req, res, next) => {
     await ensureMySQLReady();
     next();
   } catch (err) {
+    console.error('MySQL readiness check failed:', summarizeDbError(err));
     return res.status(503).json({
       error: 'SERVICE_UNAVAILABLE',
       message: 'Database unavailable',

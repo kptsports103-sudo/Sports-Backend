@@ -3,6 +3,13 @@ const Visitor = require("../models/visitor.model.js");
 
 const router = express.Router();
 
+const summarizeDbError = (error) => ({
+  code: error?.code || null,
+  errno: error?.errno || null,
+  sqlState: error?.sqlState || null,
+  message: error?.message || 'Unknown database error',
+});
+
 // Basic visit cache to prevent rapid refresh abuse
 const visitCache = new Set();
 
@@ -47,8 +54,11 @@ router.get("/count", safetyMiddleware, async (req, res) => {
       date: today
     });
   } catch (err) {
-    console.error("Visitor count error:", err);
-    res.status(500).json({ message: "Visitor count error" });
+    console.error("Visitor count error:", summarizeDbError(err));
+    res.status(503).json({
+      message: "Visitor count error",
+      code: err?.code || null,
+    });
   }
 });
 
@@ -69,8 +79,11 @@ router.get("/current", async (req, res) => {
       date: today
     });
   } catch (err) {
-    console.error("Get current count error:", err);
-    res.status(500).json({ message: "Error getting visitor count" });
+    console.error("Get current count error:", summarizeDbError(err));
+    res.status(503).json({
+      message: "Error getting visitor count",
+      code: err?.code || null,
+    });
   }
 });
 
@@ -83,8 +96,11 @@ router.get("/daily", async (req, res) => {
 
     res.json(data);
   } catch (err) {
-    console.error("Failed to fetch visitor stats:", err);
-    res.status(500).json({ message: "Failed to fetch visitor stats" });
+    console.error("Failed to fetch visitor stats:", summarizeDbError(err));
+    res.status(503).json({
+      message: "Failed to fetch visitor stats",
+      code: err?.code || null,
+    });
   }
 });
 
@@ -107,8 +123,11 @@ router.get("/daily-total", async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error("Visitor stats error:", err);
-    res.status(500).json({ message: "Visitor stats error" });
+    console.error("Visitor stats error:", summarizeDbError(err));
+    res.status(503).json({
+      message: "Visitor stats error",
+      code: err?.code || null,
+    });
   }
 });
 
