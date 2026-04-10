@@ -124,7 +124,11 @@ const routeMounts = [
 const dbGuardPaths = ['/api', ...routeMounts.map(([path]) => path)];
 
 /* ------------- Middleware ------------ */
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 app.use(morgan('dev'));
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
