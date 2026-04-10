@@ -2,22 +2,35 @@ const KpmPool = require('../models/kpmPool.model');
 
 const GLOBAL_POOL_ID = 'GLOBAL';
 const MIN_SEQUENCE = 1;
-const MAX_SEQUENCE = 99;
+const MAX_SEQUENCE = 999;
+const KPM_PREFIX_LENGTH = 4;
+const SEQUENCE_WIDTH = 3;
+const LEGACY_SEQUENCE_WIDTH = 2;
 
 const toSafeString = (value) => String(value || '').trim();
 
-const toTwoDigits = (value) => String(value).padStart(2, '0');
+const formatSequence = (value) => String(value).padStart(SEQUENCE_WIDTH, '0');
 
 const buildPrefix = (year, diplomaYear, semester) =>
   `${String(year).slice(-2)}${String(diplomaYear)}${String(semester)}`;
 
 const parseSequence = (kpmNo) => {
   const safeKpm = toSafeString(kpmNo);
-  if (!safeKpm || safeKpm.length < 6) return null;
+  if (!safeKpm) return null;
 
-  const seq = Number.parseInt(safeKpm.slice(-2), 10);
-  if (Number.isNaN(seq) || seq < MIN_SEQUENCE || seq > MAX_SEQUENCE) return null;
-  return seq;
+  const widths = [SEQUENCE_WIDTH, LEGACY_SEQUENCE_WIDTH];
+  for (const width of widths) {
+    if (safeKpm.length < KPM_PREFIX_LENGTH + width) continue;
+    const suffix = safeKpm.slice(-width);
+    if (!/^\d+$/.test(suffix)) continue;
+
+    const seq = Number.parseInt(suffix, 10);
+    if (!Number.isNaN(seq) && seq >= MIN_SEQUENCE && seq <= MAX_SEQUENCE) {
+      return seq;
+    }
+  }
+
+  return null;
 };
 
 const isActive = (status) => toSafeString(status).toUpperCase() === 'ACTIVE';
@@ -119,7 +132,7 @@ const assignGlobalKpms = (docs) => {
     if (doc.masterId && !masterPreferredSeq.has(doc.masterId)) {
       masterPreferredSeq.set(doc.masterId, candidateSeq);
     }
-    doc.kpmNo = `${prefix}${toTwoDigits(candidateSeq)}`;
+    doc.kpmNo = `${prefix}${formatSequence(candidateSeq)}`;
   });
 
   const usedSequences = new Set(sequenceOwner.keys());
@@ -145,7 +158,7 @@ const assignGlobalKpms = (docs) => {
     if (!seq) {
       seq = available.shift();
       if (!seq) {
-        throw new Error('Global KPM limit reached: all 99 active sequences are already assigned.');
+        throw new Error('Global KPM limit reached: all 999 active sequences are already assigned.');
       }
       if (doc.masterId) {
         masterPreferredSeq.set(doc.masterId, seq);
@@ -156,7 +169,7 @@ const assignGlobalKpms = (docs) => {
     if (!currentOwner) {
       sequenceOwner.set(seq, doc.masterId || `__ROW__:${doc.playerId || Math.random()}`);
     }
-    doc.kpmNo = `${prefix}${toTwoDigits(seq)}`;
+    doc.kpmNo = `${prefix}${formatSequence(seq)}`;
   });
 
   // Completed students should still carry a KPM for identity/history,
@@ -185,7 +198,7 @@ const assignGlobalKpms = (docs) => {
       }
     }
 
-    doc.kpmNo = `${prefix}${toTwoDigits(seq)}`;
+    doc.kpmNo = `${prefix}${formatSequence(seq)}`;
   });
 
   droppedDocs.forEach((doc) => {
@@ -229,5 +242,7 @@ const syncKpmPoolFromDocs = async (docs) => {
 
 module.exports = {
   assignGlobalKpms,
-  syncKpmPoolFromDocs
+  syncKpmPoolFromDocs,
+  parseKpmSequence: parseSequence,
+  MAX_KPM_SEQUENCE: MAX_SEQUENCE
 };

@@ -3,19 +3,35 @@ const Player = require('../models/player.model');
 const Result = require('../models/result.model');
 const GroupResult = require('../models/groupResult.model');
 const KpmPool = require('../models/kpmPool.model');
-const cloudinary = require('../config/cloudinary');
 const multer = require('multer');
-const mongoose = require('mongoose');
-const { assignGlobalKpms, syncKpmPoolFromDocs } = require('../services/kpmSequence.service');
+const { createObjectId, isValidObjectId } = require('../../lib/objectId');
+const {
+  assignGlobalKpms,
+  syncKpmPoolFromDocs,
+  parseKpmSequence,
+  MAX_KPM_SEQUENCE
+} = require('../services/kpmSequence.service');
+const { storeUploadedBuffer } = require('../services/hybridStorage.service');
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 const PRIZE_MEDALS = ['Gold', 'Silver', 'Bronze'];
+const YEARS_OF_EXCELLENCE_BASE = 12;
+const SPORTS_MEETS_EXCELLENCE_BASELINE = 45;
 
 const normalizeAchievementSettings = (settings = {}) => ({
   sportsMeetsConducted: String(settings?.sportsMeetsConducted || '').trim(),
   yearsOfExcellence: String(settings?.yearsOfExcellence || '').trim(),
 });
+
+const getSportsMeetsConductedValue = (timeline = []) =>
+  String(Array.isArray(timeline) ? timeline.length : 0);
+
+const getYearsOfExcellenceValue = (timeline = []) => {
+  const sportsCount = Number(getSportsMeetsConductedValue(timeline) || 0);
+  const growth = Math.max(0, sportsCount - SPORTS_MEETS_EXCELLENCE_BASELINE);
+  return String(YEARS_OF_EXCELLENCE_BASE + growth);
+};
 
 const extractLegacyAchievementValue = (achievements = [], title = '') => {
   const expectedTitle = String(title || '').trim().toLowerCase();
@@ -30,17 +46,28 @@ const extractLegacyAchievementValue = (achievements = [], title = '') => {
 };
 
 const deriveAchievementSettings = (home) => {
-  const normalizedSettings = normalizeAchievementSettings(home?.achievementSettings || {});
-  const legacyAchievements = Array.isArray(home?.achievements) ? home.achievements : [];
-
   return {
-    sportsMeetsConducted:
-      normalizedSettings.sportsMeetsConducted ||
-      extractLegacyAchievementValue(legacyAchievements, 'sports meets conducted'),
-    yearsOfExcellence:
-      normalizedSettings.yearsOfExcellence ||
-      extractLegacyAchievementValue(legacyAchievements, 'years of excellence'),
+    sportsMeetsConducted: getSportsMeetsConductedValue(home?.timeline),
+    yearsOfExcellence: getYearsOfExcellenceValue(home?.timeline),
   };
+};
+
+const ensureUniquePlayerMasterIds = (players = []) => {
+  const usedYearMasterIds = new Set();
+
+  return (players || []).map((player) => {
+    const safePlayer = { ...player };
+    const safeYear = Number(safePlayer?.year || 0);
+    let safeMasterId = String(safePlayer?.masterId || '').trim() || createObjectId();
+
+    while (usedYearMasterIds.has(`${safeYear}|${safeMasterId}`)) {
+      safeMasterId = createObjectId();
+    }
+
+    usedYearMasterIds.add(`${safeYear}|${safeMasterId}`);
+    safePlayer.masterId = safeMasterId;
+    return safePlayer;
+  });
 };
 
 const getAchievementDisplayYear = async () => {
@@ -68,30 +95,29 @@ const getAchievementDisplayYear = async () => {
 
 const getAutomaticAchievementMetrics = async () => {
   const { currentYear, displayYear, availableYears } = await getAchievementDisplayYear();
+  const totalPlayers = await Player.countDocuments({});
 
   if (availableYears.length === 0) {
     return {
       currentYear,
       displayYear,
       totalPrizesWon: 0,
-      activePlayers: 0,
-      hasAnyData: false,
+      activePlayers: totalPlayers,
+      hasAnyData: totalPlayers > 0,
       usingFallbackYear: false,
     };
   }
 
-  const [individualPrizes, groupPrizes, activePlayers, playersForYear] = await Promise.all([
+  const [individualPrizes, groupPrizes] = await Promise.all([
     Result.countDocuments({ year: displayYear, medal: { $in: PRIZE_MEDALS } }),
     GroupResult.countDocuments({ year: displayYear, medal: { $in: PRIZE_MEDALS } }),
-    Player.countDocuments({ year: displayYear, status: 'ACTIVE' }),
-    Player.countDocuments({ year: displayYear }),
   ]);
 
   return {
     currentYear,
     displayYear,
     totalPrizesWon: individualPrizes + groupPrizes,
-    activePlayers: activePlayers > 0 ? activePlayers : playersForYear,
+    activePlayers: totalPlayers,
     hasAnyData: true,
     usingFallbackYear: displayYear !== currentYear,
   };
@@ -117,20 +143,52 @@ const buildHomeAchievements = (settings, metrics) => ([
     title: 'Sports Meets Conducted',
     value: String(settings?.sportsMeetsConducted || '0'),
     icon: 'calendar',
-    mode: 'manual',
+    mode: 'auto',
   },
   {
     key: 'yearsOfExcellence',
     title: 'Years of Excellence',
     value: String(settings?.yearsOfExcellence || '0'),
     icon: 'medal',
-    mode: 'manual',
+    mode: 'auto',
   },
 ]);
 
-const mapPlayersToGroupedResponse = (players) => {
+const normalizePlayerKeyPart = (value) =>
+  String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const buildYearPlayerProfileKey = (player) => {
+  const year = String(player?.year || '').trim();
+  const name = normalizePlayerKeyPart(player?.name);
+  const branch = normalizePlayerKeyPart(player?.branch);
+  const diplomaYear = String(player?.currentDiplomaYear || player?.baseDiplomaYear || player?.diplomaYear || '').trim();
+  const semester = String(player?.semester || '1').trim();
+  const status = String(player?.status || 'ACTIVE').trim().toUpperCase();
+  const kpmNo = String(player?.kpmNo || '').trim().toUpperCase();
+  const fallbackId = String(player?.playerId || player?._id || player?.masterId || '').trim();
+
+  return [year, name, branch, diplomaYear, semester, status, kpmNo || fallbackId].join('|');
+};
+
+const mapPlayersToGroupedResponse = (players, options = {}) => {
+  const { dedupeProfiles = true } = options;
+  const seenByYear = {};
+
   return (players || []).reduce((acc, player) => {
     if (!acc[player.year]) acc[player.year] = [];
+    if (dedupeProfiles) {
+      if (!seenByYear[player.year]) seenByYear[player.year] = new Set();
+
+      const profileKey = buildYearPlayerProfileKey(player);
+      if (profileKey && seenByYear[player.year].has(profileKey)) {
+        return acc;
+      }
+
+      if (profileKey) {
+        seenByYear[player.year].add(profileKey);
+      }
+    }
+
     acc[player.year].push({
       id: player.playerId || String(player._id),
       masterId: player.masterId || '',
@@ -152,11 +210,22 @@ exports.uploadBanner = [
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
       }
-      const result = await cloudinary.uploader.upload(req.file.buffer, {
+      const storedFile = await storeUploadedBuffer({
+        req,
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype,
+        originalName: req.file.originalname,
         folder: 'banners',
-        resource_type: 'image'
+        cloudinaryOptions: {
+          folder: 'banners',
+          resource_type: 'image'
+        }
       });
-      res.json({ url: result.secure_url });
+      res.json({
+        url: storedFile.url,
+        public_id: storedFile.publicId,
+        storage: storedFile.storage,
+      });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: 'Upload failed' });
@@ -224,18 +293,30 @@ exports.updateHome = async (req, res) => {
       home = new Home();
     }
 
+    const automaticSportsMeetsConducted = getSportsMeetsConductedValue(home.timeline);
+    const automaticYearsOfExcellence = getYearsOfExcellenceValue(home.timeline);
+
     // Update new CMS fields
     if (heroTitle !== undefined) home.heroTitle = heroTitle;
     if (heroSubtitle !== undefined) home.heroSubtitle = heroSubtitle;
     if (heroButtons !== undefined) home.heroButtons = heroButtons;
     if (banners !== undefined) home.banners = banners;
     if (achievementSettings !== undefined) {
-      home.achievementSettings = normalizeAchievementSettings(achievementSettings);
+      home.achievementSettings = {
+        sportsMeetsConducted: automaticSportsMeetsConducted,
+        yearsOfExcellence: automaticYearsOfExcellence,
+      };
     } else if (achievements !== undefined) {
-      home.achievementSettings = normalizeAchievementSettings({
-        sportsMeetsConducted: extractLegacyAchievementValue(achievements, 'sports meets conducted'),
-        yearsOfExcellence: extractLegacyAchievementValue(achievements, 'years of excellence'),
-      });
+      home.achievementSettings = {
+        sportsMeetsConducted: automaticSportsMeetsConducted,
+        yearsOfExcellence: automaticYearsOfExcellence,
+      };
+    } else {
+      home.achievementSettings = {
+        ...normalizeAchievementSettings(home.achievementSettings || {}),
+        sportsMeetsConducted: automaticSportsMeetsConducted,
+        yearsOfExcellence: automaticYearsOfExcellence,
+      };
     }
     if (achievements !== undefined) home.achievements = achievements;
     if (sportsCategories !== undefined) home.sportsCategories = sportsCategories;
@@ -321,6 +402,11 @@ exports.updateAboutTimeline = async (req, res) => {
       home = new Home();
     }
     home.timeline = timeline;
+    home.achievementSettings = {
+      ...normalizeAchievementSettings(home.achievementSettings || {}),
+      sportsMeetsConducted: getSportsMeetsConductedValue(timeline),
+      yearsOfExcellence: getYearsOfExcellenceValue(timeline),
+    };
     await home.save();
     console.log('Timeline updated successfully');
     res.json({ message: 'Timeline updated successfully' });
@@ -337,17 +423,30 @@ exports.getStudentParticipation = async (req, res) => {
 
     // Fetch players from database for the year
     const players = await Player.find({ year: targetYear }).sort({ createdAt: -1 });
+    const seenProfiles = new Set();
 
-    const students = players.map(p => ({
-      id: p.playerId || String(p._id),
-      masterId: p.masterId || '',
-      name: p.name,
-      branch: p.branch,
-      diplomaYear: p.currentDiplomaYear || p.baseDiplomaYear || null,
-      semester: p.semester || '1',
-      status: p.status || 'ACTIVE',
-      kpmNo: p.kpmNo || ''
-    }));
+    const students = players.reduce((acc, p) => {
+      const profileKey = buildYearPlayerProfileKey(p);
+      if (profileKey && seenProfiles.has(profileKey)) {
+        return acc;
+      }
+
+      if (profileKey) {
+        seenProfiles.add(profileKey);
+      }
+
+      acc.push({
+        id: p.playerId || String(p._id),
+        masterId: p.masterId || '',
+        name: p.name,
+        branch: p.branch,
+        diplomaYear: p.currentDiplomaYear || p.baseDiplomaYear || null,
+        semester: p.semester || '1',
+        status: p.status || 'ACTIVE',
+        kpmNo: p.kpmNo || ''
+      });
+      return acc;
+    }, []);
 
     res.json({
       year: targetYear,
@@ -362,7 +461,8 @@ exports.getStudentParticipation = async (req, res) => {
 exports.getPlayers = async (req, res) => {
   try {
     const players = await Player.find({}).sort({ year: -1, createdAt: -1 });
-    const grouped = mapPlayersToGroupedResponse(players);
+    const useRawRows = ['1', 'true', 'yes', 'raw'].includes(String(req.query?.raw || '').trim().toLowerCase());
+    const grouped = mapPlayersToGroupedResponse(players, { dedupeProfiles: !useRawRows });
     res.json(grouped);
   } catch (error) {
     console.error('Error fetching players:', error);
@@ -372,21 +472,19 @@ exports.getPlayers = async (req, res) => {
 
 exports.getKpmPoolStatus = async (req, res) => {
   try {
-    const TOTAL_CAPACITY = 99;
+    const TOTAL_CAPACITY = MAX_KPM_SEQUENCE;
     const pool = await KpmPool.findById('GLOBAL').lean();
 
     let allocated = Array.isArray(pool?.allocated) ? pool.allocated.length : null;
     let available = Array.isArray(pool?.available) ? pool.available.length : null;
 
-    // Fallback for legacy deployments where pool doc is missing.
-    if (allocated === null || available === null) {
+    // Fallback for legacy deployments where the pool doc is missing or still sized for 99 slots.
+    if (allocated === null || available === null || allocated + available !== TOTAL_CAPACITY) {
       const activePlayers = await Player.find({ status: 'ACTIVE' }, { kpmNo: 1 }).lean();
       const used = new Set();
       activePlayers.forEach((p) => {
-        const safeKpm = String(p?.kpmNo || '').trim();
-        if (safeKpm.length < 6) return;
-        const seq = Number.parseInt(safeKpm.slice(-2), 10);
-        if (!Number.isNaN(seq) && seq >= 1 && seq <= 99) {
+        const seq = parseKpmSequence(p?.kpmNo);
+        if (seq) {
           used.add(seq);
         }
       });
@@ -415,7 +513,7 @@ exports.savePlayers = async (req, res) => {
     }
 
     const coachId = req.user?.id;
-    if (!coachId || !mongoose.Types.ObjectId.isValid(coachId)) {
+    if (!coachId || !isValidObjectId(coachId)) {
       return res.status(401).json({ message: 'Invalid authentication user.' });
     }
 
@@ -437,8 +535,8 @@ exports.savePlayers = async (req, res) => {
         const parsedStatus = String(player?.status || 'ACTIVE').trim().toUpperCase();
         const safeStatus = ['ACTIVE', 'COMPLETED', 'DROPPED'].includes(parsedStatus) ? parsedStatus : 'ACTIVE';
         const safeKpmNo = String(player?.kpmNo || '').trim();
-        const safeMasterId = String(player?.masterId || new mongoose.Types.ObjectId()).trim();
-        const playerId = String(player?.id || player?.playerId || new mongoose.Types.ObjectId());
+        const safeMasterId = String(player?.masterId || createObjectId()).trim();
+        const playerId = String(player?.id || player?.playerId || createObjectId());
 
         docs.push({
           name,
@@ -462,9 +560,14 @@ exports.savePlayers = async (req, res) => {
     }
 
     // Backend-owned enterprise KPM policy:
-    // - last 2 digits are globally unique across ACTIVE players
+    // - sequence suffix is globally unique across ACTIVE players
+    // - current capacity is 001-999, while legacy 2-digit KPMs are still recognized
     // - released automatically when status is COMPLETED/DROPPED (derived via availability)
-    const normalizedDocs = assignGlobalKpms(docs);
+    const normalizedDocs = assignGlobalKpms(ensureUniquePlayerMasterIds(docs).map((doc) => ({
+      ...doc,
+      playerId: String(doc.playerId || createObjectId()),
+      masterId: String(doc.masterId || createObjectId()).trim(),
+    })));
 
     // Clear existing and save new set.
     await Player.deleteMany({});

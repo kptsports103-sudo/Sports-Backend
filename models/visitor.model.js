@@ -1,15 +1,13 @@
-const mongoose = require("mongoose");
+const { createMySQLModel } = require('../lib/mysqlDocumentModel');
 
-const visitorSchema = new mongoose.Schema({
-  date: {
-    type: String, // YYYY-MM-DD
-    required: true,
-    unique: true
+module.exports = createMySQLModel('Visitor', {
+  collectionName: 'visitors',
+  unique: [['date']],
+  fieldTypes: {
+    count: 'integer',
   },
-  count: {
-    type: Number,
-    default: 1
-  }
+  defaults: {
+    date: '',
+    count: 1,
+  },
 });
-
-module.exports = mongoose.model("Visitor", visitorSchema);

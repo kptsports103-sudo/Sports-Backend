@@ -1,20 +1,12 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const kpmPoolSchema = new mongoose.Schema({
-  _id: {
-    type: String,
-    default: 'GLOBAL'
+module.exports = createMySQLModel('KpmPool', {
+  collectionName: 'kpm_pool',
+  timestamps: true,
+  idDefault: () => 'GLOBAL',
+  defaults: {
+    _id: 'GLOBAL',
+    available: [],
+    allocated: [],
   },
-  available: {
-    type: [Number],
-    default: []
-  },
-  allocated: {
-    type: [Number],
-    default: []
-  }
-}, {
-  timestamps: true
 });
-
-module.exports = mongoose.model('KpmPool', kpmPoolSchema);

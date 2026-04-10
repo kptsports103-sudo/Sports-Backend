@@ -1,7 +1,11 @@
 const express = require('express');
 const multer = require('multer');
-const cloudinary = require('../config/cloudinary');
 const authMiddleware = require('../middlewares/auth.middleware');
+const {
+  deleteStoredFile,
+  storeUploadedBuffer,
+  streamMySQLAsset,
+} = require('../services/hybridStorage.service');
 
 const router = express.Router();
 
@@ -21,41 +25,23 @@ router.post('/', authMiddleware, upload.array('files'), async (req, res) => {
       return res.status(400).json({ message: 'No files uploaded' });
     }
 
-    const uploadPromises = req.files.map(file => {
-      const base64 = file.buffer.toString('base64');
-      const isImage = file.mimetype.startsWith('image/');
-      const isVideo = file.mimetype.startsWith('video/');
-      const isPdf = file.mimetype === 'application/pdf';
-
-      const uploadOptions = {
+    const uploadPromises = req.files.map((file) =>
+      storeUploadedBuffer({
+        req,
+        buffer: file.buffer,
+        mimetype: file.mimetype,
+        originalName: file.originalname,
         folder: 'media',
-      };
-
-      if (isVideo) {
-        uploadOptions.resource_type = 'video';
-        uploadOptions.quality = 'auto';
-        uploadOptions.fetch_format = 'auto';
-        uploadOptions.transformation = [{ width: 1280, crop: 'limit' }, { bitrate: '1m' }];
-      } else if (isImage) {
-        uploadOptions.resource_type = 'image';
-        uploadOptions.quality = 'auto';
-        uploadOptions.fetch_format = 'auto';
-        uploadOptions.transformation = [{ width: 2000, crop: 'limit' }];
-      } else if (isPdf) {
-        uploadOptions.resource_type = 'raw';
-      } else {
-        uploadOptions.resource_type = 'auto';
-      }
-
-      return cloudinary.uploader.upload(`data:${file.mimetype};base64,${base64}`, uploadOptions);
-    });
+      })
+    );
 
     const results = await Promise.all(uploadPromises);
     console.log('Upload results:', results.length);
 
-    const files = results.map(result => ({
-      url: result.secure_url,
-      public_id: result.public_id
+    const files = results.map((result) => ({
+      url: result.url,
+      public_id: result.publicId,
+      storage: result.storage,
     }));
 
     res.json({ success: true, files });
@@ -92,10 +78,26 @@ router.post('/', authMiddleware, upload.array('files'), async (req, res) => {
   }
 });
 
-router.delete('/:public_id', authMiddleware, async (req, res) => {
+router.get('/assets/:assetId', async (req, res) => {
   try {
-    const { public_id } = req.params;
-    await cloudinary.uploader.destroy(public_id);
+    const found = await streamMySQLAsset(req, res, req.params.assetId);
+    if (!found) {
+      return res.status(404).json({ success: false, message: 'File not found' });
+    }
+  } catch (error) {
+    console.error('Asset stream error:', error);
+    res.status(500).json({ success: false, message: 'Failed to load file' });
+  }
+});
+
+router.delete('/*', authMiddleware, async (req, res) => {
+  try {
+    const publicId = String(req.params[0] || '').trim();
+    if (!publicId) {
+      return res.status(400).json({ success: false, message: 'public_id is required' });
+    }
+
+    await deleteStoredFile(publicId);
     res.json({ success: true });
   } catch (error) {
     console.error('Delete error:', error);

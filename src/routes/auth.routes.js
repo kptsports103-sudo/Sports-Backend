@@ -12,7 +12,4 @@ router.post('/verify-otp', authController.verifyOTP);
 /* CLERK LOGIN */
 router.post('/clerk-login', authController.clerkLogin);
 
-/* TEMPORARY REGISTER ADMIN */
-router.post('/register-admin', authController.registerAdmin);
-
 module.exports = router;

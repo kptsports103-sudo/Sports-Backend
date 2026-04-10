@@ -49,7 +49,7 @@ exports.login = async (req, res) => {
     console.error('=== LOGIN ERROR ===');
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
-    res.status(400).json({ message: error.message || 'Server error' });
+    res.status(error.statusCode || 400).json({ message: error.message || 'Server error' });
   }
 };
 

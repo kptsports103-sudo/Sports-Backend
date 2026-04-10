@@ -1,52 +1,27 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const userSchema = new mongoose.Schema({
-  clerkUserId: {
-    type: String,
+module.exports = createMySQLModel('User', {
+  collectionName: 'users',
+  unique: [['email', 'role']],
+  indexes: [['role'], ['clerkUserId']],
+  fieldTypes: {
+    otp: 'string',
+    otp_expires_at: 'date',
+    is_verified: 'boolean',
+    profileImage: 'text',
+    createdAt: 'date',
   },
-  name: {
-    type: String,
-    required: true,
-  },
-  email: {
-    type: String,
-    required: true,
-    lowercase: true,
-  },
-  phone: {
-    type: String,
-  },
-  password: {
-    type: String,
-    required: true,
-  },
-  role: {
-    type: String,
-    // Canonical roles: superadmin/admin/creator/viewer.
-    // coach/student retained only for legacy data compatibility.
-    enum: ['superadmin', 'admin', 'creator', 'viewer', 'coach', 'student'],
-    required: true,
-  },
-  otp: {
-    type: String,
-  },
-  otp_expires_at: {
-    type: Date,
-  },
-  is_verified: {
-    type: Boolean,
-    default: false,
-  },
-  profileImage: {
-    type: String, // base64 encoded image or URL
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
+  defaults: {
+    clerkUserId: '',
+    name: '',
+    email: '',
+    phone: '',
+    password: '',
+    role: 'viewer',
+    otp: null,
+    otp_expires_at: null,
+    is_verified: false,
+    profileImage: '',
+    createdAt: () => new Date().toISOString(),
   },
 });
-
-// Compound unique index on email and role
-userSchema.index({ email: 1, role: 1 }, { unique: true });
-
-module.exports = mongoose.model('User', userSchema);

@@ -1,37 +1,18 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const attendanceSchema = new mongoose.Schema({
-  date: {
-    type: Date,
-    required: true
+module.exports = createMySQLModel('Attendance', {
+  collectionName: 'attendances',
+  timestamps: true,
+  unique: [['coachId', 'date']],
+  indexes: [['coachId'], ['year']],
+  fieldTypes: {
+    date: 'date',
+    year: 'integer',
   },
-  year: {
-    type: Number,
-    required: true
+  defaults: {
+    date: null,
+    year: null,
+    records: [],
+    coachId: '',
   },
-  records: [{
-    playerName: {
-      type: String,
-      required: true
-    },
-    morning: {
-      type: String,
-      enum: ['Present', 'Absent', 'Late', 'Excused'],
-      required: true
-    },
-    evening: {
-      type: String,
-      enum: ['Present', 'Absent', 'Late', 'Excused'],
-      required: true
-    }
-  }],
-  coachId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  }
-}, {
-  timestamps: true
 });
-
-module.exports = mongoose.model('Attendance', attendanceSchema);

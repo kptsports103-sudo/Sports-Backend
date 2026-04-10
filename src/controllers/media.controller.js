@@ -1,12 +1,84 @@
 const cloudinary = require('../config/cloudinary');
 const MediaActivity = require('../models/mediaActivity.model');
+const {
+  CLOUDINARY_STORAGE_LIMIT_BYTES: STORAGE_LIMIT_BYTES,
+  getMySQLAssetStats,
+  getStoragePolicySnapshot,
+  hasCloudinaryCredentials,
+  SMALL_IMAGE_MAX_BYTES,
+} = require('../services/hybridStorage.service');
 
-const STORAGE_LIMIT_BYTES = 1 * 1024 * 1024 * 1024; // 1 GB
+const CLOUDINARY_RESOURCE_COUNT_CACHE_TTL_MS = Number(
+  process.env.CLOUDINARY_RESOURCE_COUNT_CACHE_TTL_MS || 5 * 60 * 1000
+);
+const CLOUDINARY_RESOURCE_COUNT_MAX_PAGES = Number(
+  process.env.CLOUDINARY_RESOURCE_COUNT_MAX_PAGES || 20
+);
+
+const cloudinaryResourceCountCache = {
+  checkedAt: 0,
+  data: null,
+};
 
 const normalizeUsageValue = (value) => {
   if (typeof value === 'number') return value;
   if (value && typeof value === 'object') return Number(value.usage || 0);
   return 0;
+};
+
+const countCloudinaryResourcesByType = async (resourceType) => {
+  let nextCursor = undefined;
+  let count = 0;
+  let exact = true;
+
+  for (let page = 0; page < CLOUDINARY_RESOURCE_COUNT_MAX_PAGES; page += 1) {
+    const response = await cloudinary.api.resources({
+      type: 'upload',
+      resource_type: resourceType,
+      max_results: 500,
+      next_cursor: nextCursor,
+    });
+
+    count += Array.isArray(response?.resources) ? response.resources.length : 0;
+    if (!response?.next_cursor) {
+      return { count, exact };
+    }
+
+    nextCursor = response.next_cursor;
+  }
+
+  exact = false;
+  return { count, exact };
+};
+
+const getCloudinaryResourceCounts = async () => {
+  const now = Date.now();
+  if (
+    cloudinaryResourceCountCache.data &&
+    cloudinaryResourceCountCache.checkedAt &&
+    now - cloudinaryResourceCountCache.checkedAt < CLOUDINARY_RESOURCE_COUNT_CACHE_TTL_MS
+  ) {
+    return cloudinaryResourceCountCache.data;
+  }
+
+  const [images, videos, raw] = await Promise.all([
+    countCloudinaryResourcesByType('image'),
+    countCloudinaryResourcesByType('video'),
+    countCloudinaryResourcesByType('raw'),
+  ]);
+
+  const exact = images.exact && videos.exact && raw.exact;
+  const data = {
+    imageCount: images.count,
+    videoCount: videos.count,
+    rawCount: raw.count,
+    totalAssets: images.count + videos.count + raw.count,
+    exact,
+  };
+
+  cloudinaryResourceCountCache.checkedAt = now;
+  cloudinaryResourceCountCache.data = data;
+  return data;
 };
 
 const getCloudinaryUsage = async (req, res) => {
@@ -33,23 +105,168 @@ const getCloudinaryUsage = async (req, res) => {
 
 const getCloudinaryStats = async (req, res) => {
   try {
-    const usage = await cloudinary.api.usage();
+    const timestamp = new Date().toISOString();
+    const mysqlStats = await getMySQLAssetStats();
+    const policy = getStoragePolicySnapshot();
+
+    if (!hasCloudinaryCredentials()) {
+      return res.json({
+        success: true,
+        data: {
+          cloudinary: {
+            enabled: false,
+            status: 'disabled',
+            storageLimit: STORAGE_LIMIT_BYTES,
+            storageUsed: 0,
+            remainingStorage: STORAGE_LIMIT_BYTES,
+            percentUsed: 0,
+            bandwidth: 0,
+            transformations: 0,
+            requests: 0,
+            totalAssets: 0,
+            imageCount: 0,
+            videoCount: 0,
+            rawCount: 0,
+            countsExact: true,
+            estimatedRemainingSmallImages: Math.floor(
+              STORAGE_LIMIT_BYTES / Math.max(1, SMALL_IMAGE_MAX_BYTES)
+            ),
+            timestamp,
+          },
+          mysql: mysqlStats,
+          policy,
+          summary: {
+            totalAssets: mysqlStats.totalAssets,
+            totalStorageBytes: mysqlStats.totalSizeBytes,
+            cloudinaryAssets: 0,
+            mysqlAssets: mysqlStats.totalAssets,
+          },
+          storageLimit: STORAGE_LIMIT_BYTES,
+          storageUsed: 0,
+          remainingStorage: STORAGE_LIMIT_BYTES,
+          percentUsed: 0,
+          bandwidth: 0,
+          transformations: 0,
+          requests: 0,
+          timestamp,
+        },
+      });
+    }
+
+    let usage = null;
+    let counts = {
+      imageCount: 0,
+      videoCount: 0,
+      rawCount: 0,
+      totalAssets: 0,
+      exact: true,
+    };
+    let cloudinaryError = '';
+
+    try {
+      usage = await cloudinary.api.usage();
+    } catch (error) {
+      cloudinaryError = error?.message || 'Unable to fetch Cloudinary usage';
+    }
+
+    if (!cloudinaryError) {
+      try {
+        counts = await getCloudinaryResourceCounts();
+      } catch (error) {
+        cloudinaryError = error?.message || 'Unable to fetch Cloudinary resource counts';
+      }
+    }
+
+    if (cloudinaryError) {
+      return res.json({
+        success: true,
+        data: {
+          cloudinary: {
+            enabled: true,
+            status: 'error',
+            message: cloudinaryError,
+            storageLimit: STORAGE_LIMIT_BYTES,
+            storageUsed: 0,
+            remainingStorage: STORAGE_LIMIT_BYTES,
+            percentUsed: 0,
+            bandwidth: 0,
+            transformations: 0,
+            requests: 0,
+            totalAssets: 0,
+            imageCount: 0,
+            videoCount: 0,
+            rawCount: 0,
+            countsExact: true,
+            estimatedRemainingSmallImages: Math.floor(
+              STORAGE_LIMIT_BYTES / Math.max(1, SMALL_IMAGE_MAX_BYTES)
+            ),
+            timestamp,
+          },
+          mysql: mysqlStats,
+          policy,
+          summary: {
+            totalAssets: mysqlStats.totalAssets,
+            totalStorageBytes: mysqlStats.totalSizeBytes,
+            cloudinaryAssets: 0,
+            mysqlAssets: mysqlStats.totalAssets,
+          },
+          storageLimit: STORAGE_LIMIT_BYTES,
+          storageUsed: 0,
+          remainingStorage: STORAGE_LIMIT_BYTES,
+          percentUsed: 0,
+          bandwidth: 0,
+          transformations: 0,
+          requests: 0,
+          timestamp,
+        },
+      });
+    }
+
     const usedStorage = normalizeUsageValue(usage?.storage);
     const remainingStorage = Math.max(0, STORAGE_LIMIT_BYTES - usedStorage);
     const rawPercent = STORAGE_LIMIT_BYTES > 0 ? (usedStorage / STORAGE_LIMIT_BYTES) * 100 : 0;
     const percentUsed = Math.max(0, Math.min(100, Number(rawPercent.toFixed(2))));
+    const cloudinarySummary = {
+      enabled: true,
+      status: percentUsed >= 100 ? 'full' : percentUsed >= 80 ? 'warning' : 'healthy',
+      storageLimit: STORAGE_LIMIT_BYTES,
+      storageUsed: usedStorage,
+      remainingStorage,
+      percentUsed,
+      bandwidth: normalizeUsageValue(usage?.bandwidth),
+      transformations: normalizeUsageValue(usage?.transformations),
+      requests: normalizeUsageValue(usage?.requests),
+      totalAssets: counts.totalAssets,
+      imageCount: counts.imageCount,
+      videoCount: counts.videoCount,
+      rawCount: counts.rawCount,
+      countsExact: counts.exact,
+      estimatedRemainingSmallImages: Math.floor(
+        remainingStorage / Math.max(1, SMALL_IMAGE_MAX_BYTES)
+      ),
+      timestamp,
+    };
 
     return res.json({
       success: true,
       data: {
-        storageLimit: STORAGE_LIMIT_BYTES,
-        storageUsed: usedStorage,
-        remainingStorage,
-        percentUsed,
-        bandwidth: normalizeUsageValue(usage?.bandwidth),
-        transformations: normalizeUsageValue(usage?.transformations),
-        requests: normalizeUsageValue(usage?.requests),
-        timestamp: new Date().toISOString(),
+        cloudinary: cloudinarySummary,
+        mysql: mysqlStats,
+        policy,
+        summary: {
+          totalAssets: counts.totalAssets + mysqlStats.totalAssets,
+          totalStorageBytes: usedStorage + mysqlStats.totalSizeBytes,
+          cloudinaryAssets: counts.totalAssets,
+          mysqlAssets: mysqlStats.totalAssets,
+        },
+        storageLimit: cloudinarySummary.storageLimit,
+        storageUsed: cloudinarySummary.storageUsed,
+        remainingStorage: cloudinarySummary.remainingStorage,
+        percentUsed: cloudinarySummary.percentUsed,
+        bandwidth: cloudinarySummary.bandwidth,
+        transformations: cloudinarySummary.transformations,
+        requests: cloudinarySummary.requests,
+        timestamp,
       },
     });
   } catch (error) {

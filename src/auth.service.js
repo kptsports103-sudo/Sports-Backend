@@ -6,6 +6,8 @@ const emailService = require('./services/email.service');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeOtp = (value) => String(value || '').replace(/\D/g, '').trim();
+const normalizeRole = (value) => String(value || '').trim().toLowerCase();
+const isPasswordHash = (value) => /^\$2[aby]?\$/.test(String(value || ''));
 
 const loginUser = async (email, password, role) => {
   const requestId = Math.random().toString(36).substr(2, 9);
@@ -20,33 +22,61 @@ const loginUser = async (email, password, role) => {
     
     // Normalize email
     const normalizedEmail = normalizeEmail(email);
+    const normalizedRequestedRole = normalizeRole(role);
     console.log('Normalized email:', normalizedEmail);
     
-    // Find user by email first (separate from role check)
-    let user = await User.findOne({ email: normalizedEmail });
-    console.log('User found by email:', !!user);
-    
-    if (!user) {
+    const users = await User.find({ email: normalizedEmail });
+    console.log('Users found by email:', users.length);
+
+    if (!users.length) {
       console.log('ERROR: User not found with email:', normalizedEmail);
       throw new Error('User not found');
     }
-    
-    console.log('User found - Email:', user.email, 'Role:', user.role, 'ID:', user._id);
-    
-    // Check password
-    const isMatch = await bcrypt.compare(password, user.password);
-    console.log('Password match result:', isMatch);
-    if (!isMatch) {
+
+    const roleMatchedUsers = normalizedRequestedRole
+      ? users.filter((candidate) => normalizeRole(candidate.role) === normalizedRequestedRole)
+      : users;
+
+    if (normalizedRequestedRole && !roleMatchedUsers.length) {
+      console.log('ERROR: Role mismatch - no user found for requested role:', role);
+      throw new Error(`Invalid role. No ${role} account found for ${normalizedEmail}.`);
+    }
+
+    const passwordCapableUsers = roleMatchedUsers.filter((candidate) => isPasswordHash(candidate.password));
+    if (!passwordCapableUsers.length) {
+      console.log('ERROR: Account does not have a valid password hash');
+      throw new Error('This account does not support password login');
+    }
+
+    let user = null;
+    for (const candidate of passwordCapableUsers) {
+      const candidateMatch = await bcrypt.compare(password, candidate.password);
+      console.log('Password match check for role:', candidate.role, '=>', candidateMatch);
+      if (candidateMatch) {
+        if (user) {
+          console.log('ERROR: Multiple accounts matched the provided password');
+          throw new Error('Multiple accounts found for this email. Please sign in with a specific role.');
+        }
+        user = candidate;
+      }
+    }
+
+    if (!user) {
       console.log('ERROR: Password does not match');
       throw new Error('Invalid credentials');
     }
+
+    console.log('User found - Email:', user.email, 'Role:', user.role, 'ID:', user._id);
     
     // Validate role only if explicitly provided by the client.
-    if (role && user.role.toLowerCase() !== role.toLowerCase()) {
+    const normalizedUserRole = normalizeRole(user.role);
+
+    if (normalizedRequestedRole && normalizedUserRole !== normalizedRequestedRole) {
       console.log('ERROR: Role mismatch - DB role:', user.role, 'Requested role:', role);
       throw new Error(`Invalid role. User role is ${user.role}, but ${role} was requested.`);
     }
-    if (['superadmin', 'admin', 'creator'].includes(user.role)) {
+
+    if (['superadmin', 'admin', 'creator'].includes(normalizedUserRole)) {
       await generateOTPForUser(user, normalizedEmail);
       return { 
         message: 'OTP sent to your email',
@@ -90,7 +120,9 @@ async function generateOTPForUser(user, email) {
     console.log('Email sent successfully');
   } catch (error) {
     console.error('Error in generateOTPForUser:', error);
-    throw new Error('Failed to generate and send OTP: ' + error.message);
+    const wrappedError = new Error('Failed to generate and send OTP: ' + error.message);
+    wrappedError.statusCode = 500;
+    throw wrappedError;
   }
 }
 

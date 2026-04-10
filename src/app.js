@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 
-const { connectMongoDB } = require('./config/mongodb');
+const { ensureMySQLReady } = require('./config/mysqlReady');
 
 // Routes
 const authRoutes = require('./routes/auth.routes');
@@ -64,7 +64,7 @@ app.get('/', (req, res) => {
 app.get('/healthz', (req, res) => {
   res.status(200).json({
     status: 'ok',
-    db: 'connected',
+    db: 'mysql',
     timestamp: new Date().toISOString()
   });
 });
@@ -77,7 +77,7 @@ app.get('/favicon.png', (_, res) => res.status(204).end());
 // Database readiness guard - await connection for API routes
 app.use('/api', async (req, res, next) => {
   try {
-    await connectMongoDB(); // waits once, cached after
+    await ensureMySQLReady();
     next();
   } catch (err) {
     return res.status(503).json({

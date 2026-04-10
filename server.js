@@ -1,15 +1,14 @@
 require('dotenv').config();
 
 const app = require('./src/app');
-const { connectMongoDB } = require('./src/config/mongodb');
+const { ensureMySQLReady } = require('./src/config/mysqlReady');
 
 const PORT = process.env.PORT || 4000;
 
 async function startServer() {
   try {
-    // Connect to MongoDB
-    await connectMongoDB();
-    console.log('MongoDB connected successfully');
+    await ensureMySQLReady();
+    console.log('MySQL connected successfully');
     
     // Start the server
     app.listen(PORT, () => {

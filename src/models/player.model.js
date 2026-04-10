@@ -1,83 +1,28 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const playerSchema = new mongoose.Schema({
-  // Canonical identifier - used in all results
-  playerId: {
-    type: String,
-    required: true,
-    unique: true
+module.exports = createMySQLModel('Player', {
+  collectionName: 'players',
+  timestamps: true,
+  unique: [['playerId']],
+  indexes: [['masterId'], ['year'], ['status'], ['coachId']],
+  fieldTypes: {
+    firstParticipationYear: 'integer',
+    baseDiplomaYear: 'integer',
+    currentDiplomaYear: 'integer',
+    year: 'integer',
   },
-  // Permanent identity across years for the same student
-  masterId: {
-    type: String,
-    required: true,
-    trim: true
+  defaults: {
+    playerId: '',
+    masterId: '',
+    name: '',
+    branch: '',
+    kpmNo: '',
+    firstParticipationYear: null,
+    baseDiplomaYear: 1,
+    currentDiplomaYear: 1,
+    semester: '1',
+    status: 'ACTIVE',
+    year: null,
+    coachId: '',
   },
-  name: {
-    type: String,
-    required: true
-  },
-  branch: {
-    type: String,
-    required: true
-  },
-  // Unique institutional player number
-  kpmNo: {
-    type: String,
-    default: '',
-    trim: true
-  },
-  // Academic tracking
-  firstParticipationYear: {
-    type: Number,
-    required: true
-  },
-  baseDiplomaYear: {
-    type: Number,
-    required: true,
-    min: 1,
-    max: 3
-  },
-  // Current values (may change each year)
-  currentDiplomaYear: {
-    type: Number,
-    min: 1,
-    max: 3
-  },
-  // Semester at time of record save (1-6)
-  semester: {
-    type: String,
-    enum: ['1', '2', '3', '4', '5', '6'],
-    default: '1'
-  },
-  // Lifecycle status: ACTIVE can hold KPM, COMPLETED/DROPPED can release KPM for reuse
-  status: {
-    type: String,
-    enum: ['ACTIVE', 'COMPLETED', 'DROPPED'],
-    default: 'ACTIVE'
-  },
-  year: {
-    type: Number,
-    required: true
-  },
-  coachId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-}, {
-  timestamps: true
 });
-
-// Index for fast lookups
-playerSchema.index({ playerId: 1 });
-playerSchema.index({ masterId: 1 });
-playerSchema.index({ kpmNo: 1 });
-playerSchema.index({ name: 1 });
-playerSchema.index({ firstParticipationYear: 1 });
-
-module.exports = mongoose.model('Player', playerSchema);

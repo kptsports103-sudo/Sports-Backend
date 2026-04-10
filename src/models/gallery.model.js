@@ -1,27 +1,14 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const gallerySchema = new mongoose.Schema({
-  title: {
-    type: String,
+module.exports = createMySQLModel('Gallery', {
+  collectionName: 'galleries',
+  fieldTypes: {
+    createdAt: 'date',
   },
-  media: [{
-    url: {
-      type: String,
-      required: true,
-    },
-    overview: {
-      type: String,
-      default: '',
-    },
-  }],
-  visibility: {
-    type: Boolean,
-    default: true,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
+  defaults: {
+    title: '',
+    media: [],
+    visibility: true,
+    createdAt: () => new Date().toISOString(),
   },
 });
-
-module.exports = mongoose.model('Gallery', gallerySchema);

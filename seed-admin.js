@@ -1,80 +1,94 @@
 require('dotenv').config();
-const mongoose = require('mongoose');
+
 const bcrypt = require('bcryptjs');
+
+const { connectMySQL } = require('./src/config/mysql');
 const User = require('./src/models/user.model');
+
+const ADMIN_USERS = [
+  {
+    name: 'Yashawantha',
+    email: 'yashawanthareddyd@gmail.com',
+    role: 'superadmin',
+    password: process.env.SUPERADMIN_SEED_PASSWORD || 'admin123',
+  },
+  {
+    name: 'D Yashawantha Reddy',
+    email: 'yashawanthareddyd@gmail.com',
+    role: 'admin',
+    password: process.env.ADMIN_SEED_PASSWORD || '@Admin#KPT!103$',
+  },
+  {
+    name: 'KPT Sports',
+    email: 'kptsports103@gmail.com',
+    role: 'creator',
+    password: process.env.CREATOR_SEED_PASSWORD || 'admin123',
+  },
+];
+
+async function upsertAdminUser(userConfig) {
+  let existingUser = await User.findOne({
+    role: userConfig.role,
+  });
+
+  if (!existingUser) {
+    existingUser = await User.findOne({
+      email: userConfig.email,
+      role: userConfig.role,
+    });
+  }
+
+  if (existingUser) {
+    existingUser.name = userConfig.name;
+    existingUser.email = userConfig.email;
+    existingUser.password = userConfig.hashedPassword;
+    existingUser.clerkUserId = userConfig.email;
+    existingUser.profileImage = existingUser.profileImage || 'https://via.placeholder.com/80';
+    existingUser.is_verified = true;
+    existingUser.otp = null;
+    existingUser.otp_expires_at = null;
+    await existingUser.save();
+    return { user: existingUser, created: false };
+  }
+
+  const createdUser = new User({
+    name: userConfig.name,
+    email: userConfig.email,
+    password: userConfig.hashedPassword,
+    role: userConfig.role,
+    clerkUserId: userConfig.email,
+    profileImage: 'https://via.placeholder.com/80',
+    is_verified: true,
+    otp: null,
+    otp_expires_at: null,
+  });
+
+  await createdUser.save();
+  return { user: createdUser, created: true };
+}
 
 async function seedAdmin() {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
-    
-    // Delete existing admin users first
-    await User.deleteMany({ 
-      email: { 
-        $in: [
-          'superadmin@kpt.com',
-          'admin@kpt.com', 
-          'creator@kpt.com'
-        ]
-      }
-    });
-    console.log('Deleted existing admin users');
+    await connectMySQL();
+    await User.ensureTable();
 
-    // Hash passwords
-    const superadminPassword = await bcrypt.hash('SuperAdmin@123', 10);
-    const adminPassword = await bcrypt.hash('Admin@123', 10);
-    const creatorPassword = await bcrypt.hash('Creator@123', 10);
+    console.log('=== SEEDING MYSQL ADMIN USERS ===');
 
-    // Create SuperAdmin
-    const superadmin = new User({
-      name: 'Super Admin',
-      email: 'superadmin@kpt.com',
-      password: superadminPassword,
-      role: 'superadmin',
-      clerkUserId: 'superadmin@kpt.com',
-      profileImage: 'https://via.placeholder.com/80',
-      is_verified: true
-    });
-    await superadmin.save();
-    console.log(' SuperAdmin user created: superadmin@kpt.com / SuperAdmin@123');
+    for (const adminUser of ADMIN_USERS) {
+      const preparedUser = {
+        ...adminUser,
+        hashedPassword: await bcrypt.hash(adminUser.password, 10),
+      };
+      const { created } = await upsertAdminUser(preparedUser);
+      console.log(
+        `${created ? 'Created' : 'Updated'} ${adminUser.role}: ${adminUser.email} / ${adminUser.password}`
+      );
+    }
 
-    // Create Admin
-    const admin = new User({
-      name: 'Admin User',
-      email: 'admin@kpt.com',
-      password: adminPassword,
-      role: 'admin',
-      clerkUserId: 'admin@kpt.com',
-      profileImage: 'https://via.placeholder.com/80',
-      is_verified: true
-    });
-    await admin.save();
-    console.log(' Admin user created: admin@kpt.com / Admin@123');
-
-    // Create Creator
-    const creator = new User({
-      name: 'Creator User',
-      email: 'creator@kpt.com',
-      password: creatorPassword,
-      role: 'creator',
-      clerkUserId: 'creator@kpt.com',
-      profileImage: 'https://via.placeholder.com/80',
-      is_verified: true
-    });
-    await creator.save();
-    console.log(' Creator user created: creator@kpt.com / Creator@123');
-
-    console.log('\n All admin users created successfully!');
-    console.log('\n Login Credentials:');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(' SuperAdmin: superadmin@kpt.com / SuperAdmin@123');
-    console.log(' Admin:      admin@kpt.com / Admin@123');
-    console.log(' Creator:    creator@kpt.com / Creator@123');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
+    console.log('\nAdmin accounts are ready in MySQL.');
   } catch (error) {
-    console.error(' Error creating admin users:', error);
-  } finally {
-    mongoose.connection.close();
+    console.error('Error creating admin users:', error);
+    process.exitCode = 1;
   }
 }
 

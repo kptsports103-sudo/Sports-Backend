@@ -4,14 +4,15 @@ const otpService = require('../services/otp.service');
 const { normalizeRole } = require('../utils/roleMapper');
 const emailService = require('../services/email.service');
 const smsService = require('../services/sms.service');
-const cloudinary = require('../config/cloudinary');
 const { randomUUID } = require('crypto');
 const jwt = require('jsonwebtoken');
 const { normalizeRole: normalizeAccessRole } = require('../utils/roles');
+const { storeDataUri } = require('../services/hybridStorage.service');
 
 // In-memory token store for onboarding (in production, use database)
 const onboardingTokens = {};
 const onboardingOTPs = {};
+const onboardingVerifications = {};
 
 const ROLES = {
   SUPERADMIN: 'superadmin',
@@ -21,6 +22,63 @@ const ROLES = {
 };
 
 const CREATABLE_ROLES = [ROLES.ADMIN, ROLES.CREATOR];
+const ONBOARDING_VERIFICATION_TTL_MS = 15 * 60 * 1000;
+const ONBOARDING_ALLOWED_AUTH_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN];
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
+const getOnboardingStateKey = (email, token) => `${normalizeEmail(email)}::${String(token || '').trim()}`;
+
+const getInvitationTokenData = (token) => {
+  const safeToken = String(token || '').trim();
+  if (!safeToken) return null;
+
+  const tokenData = onboardingTokens[safeToken];
+  if (!tokenData || tokenData.used || tokenData.expires < Date.now()) {
+    return null;
+  }
+
+  return tokenData;
+};
+
+const resolveOnboardingAccess = (req, token) => {
+  const requesterRole = getRequesterRoleFromAuthHeader(req);
+  const tokenData = getInvitationTokenData(token);
+  const hasPrivilegedAuth = ONBOARDING_ALLOWED_AUTH_ROLES.includes(requesterRole);
+
+  return {
+    requesterRole,
+    tokenData,
+    hasValidInvitationToken: Boolean(tokenData),
+    hasPrivilegedAuth,
+  };
+};
+
+const requireOnboardingAccess = (req, res, token) => {
+  const access = resolveOnboardingAccess(req, token);
+
+  if (access.hasPrivilegedAuth || access.hasValidInvitationToken) {
+    return access;
+  }
+
+  res.status(403).json({
+    message: 'Authenticated admin access or a valid invitation token is required.',
+  });
+  return null;
+};
+
+const getVerifiedOnboardingRecord = (email, token) => {
+  const key = getOnboardingStateKey(email, token);
+  const record = onboardingVerifications[key];
+
+  if (!record) return null;
+  if (record.expiresAt < Date.now()) {
+    delete onboardingVerifications[key];
+    return null;
+  }
+
+  return record;
+};
 
 const canDeleteUser = (currentUser, targetUser) => {
   const currentRole = normalizeAccessRole(currentUser?.role);
@@ -354,12 +412,17 @@ const resolveToken = async (req, res) => {
 };
 
 const sendOTPOnboarding = async (req, res) => {
-  const { email } = req.body;
+  const { email, token } = req.body;
 
   try {
+    const access = requireOnboardingAccess(req, res, token);
+    if (!access) return;
+
+    const normalizedEmail = normalizeEmail(email);
+
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
       return res.status(400).json({ message: 'Please enter a valid email address' });
     }
 
@@ -368,13 +431,13 @@ const sendOTPOnboarding = async (req, res) => {
     const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
     // Store OTP
-    onboardingOTPs[email] = {
+    onboardingOTPs[getOnboardingStateKey(normalizedEmail, access.hasValidInvitationToken ? token : null)] = {
       otp,
       expiresAt: otpExpiresAt
     };
 
     // Send OTP via Email
-    await emailService.sendOTP(email, otp);
+    await emailService.sendOTP(normalizedEmail, otp);
 
     res.json({
       message: 'OTP sent successfully to email address',
@@ -387,17 +450,22 @@ const sendOTPOnboarding = async (req, res) => {
 };
 
 const verifyOTPOnboarding = async (req, res) => {
-  const { email, otp } = req.body;
+  const { email, otp, token } = req.body;
 
   try {
-    const otpData = onboardingOTPs[email];
+    const access = requireOnboardingAccess(req, res, token);
+    if (!access) return;
+
+    const normalizedEmail = normalizeEmail(email);
+    const stateKey = getOnboardingStateKey(normalizedEmail, access.hasValidInvitationToken ? token : null);
+    const otpData = onboardingOTPs[stateKey];
 
     if (!otpData) {
       return res.status(400).json({ message: 'No OTP found for this email' });
     }
 
     if (new Date() > otpData.expiresAt) {
-      delete onboardingOTPs[email];
+      delete onboardingOTPs[stateKey];
       return res.status(400).json({ message: 'OTP has expired' });
     }
 
@@ -406,7 +474,13 @@ const verifyOTPOnboarding = async (req, res) => {
     }
 
     // Clear OTP after successful verification
-    delete onboardingOTPs[email];
+    delete onboardingOTPs[stateKey];
+    onboardingVerifications[stateKey] = {
+      email: normalizedEmail,
+      token: access.hasValidInvitationToken ? String(token).trim() : null,
+      verifiedAt: Date.now(),
+      expiresAt: Date.now() + ONBOARDING_VERIFICATION_TTL_MS,
+    };
 
     res.json({
       message: 'Email verified successfully',
@@ -560,22 +634,24 @@ const createUserOnboarding = async (req, res) => {
   console.log('Create user request:', { name, phone, email, role, hasToken: !!token });
 
   try {
+    const access = requireOnboardingAccess(req, res, token);
+    if (!access) return;
+
     // Check if token is provided (invitation-based) or direct onboarding
     let userRole = role; // Default to provided role
-    let hasValidInvitationToken = false;
+    const hasValidInvitationToken = access.hasValidInvitationToken;
 
-    // Only validate token if it's provided and not empty
-    if (token && typeof token === 'string' && token.trim() !== '') {
+    if (hasValidInvitationToken) {
       console.log('Validating token:', token);
-      // Token-based onboarding - validate token
-      const tokenData = onboardingTokens[token];
-      if (!tokenData || tokenData.used || tokenData.expires < Date.now()) {
-        console.log('Token validation failed:', { exists: !!tokenData, used: tokenData?.used, expired: tokenData?.expires < Date.now() });
-        return res.status(400).json({ message: 'Invalid or expired token' });
-      }
-      hasValidInvitationToken = true;
-      userRole = tokenData.role; // Use role from token
+      userRole = access.tokenData.role; // Use role from token
       console.log('Token validated, role:', userRole);
+
+      const verifiedRecord = getVerifiedOnboardingRecord(email, token);
+      if (!verifiedRecord) {
+        return res.status(403).json({
+          message: 'Email verification is required before creating an account from an invitation.',
+        });
+      }
     } else {
       console.log('Direct onboarding, using role:', role);
     }
@@ -584,7 +660,7 @@ const createUserOnboarding = async (req, res) => {
     const normalizedRole = normalizeRole(userRole);
     console.log('Role normalized from', userRole, 'to', normalizedRole);
 
-    const requesterRole = getRequesterRoleFromAuthHeader(req);
+    const requesterRole = access.requesterRole;
     if (!canCreateOnboardingRole({ requesterRole, targetRole: normalizedRole, hasValidInvitationToken })) {
       return res.status(403).json({
         message: 'You do not have permission to create this role.'
@@ -615,20 +691,26 @@ const createUserOnboarding = async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Upload profile image to Cloudinary if provided
+    // Upload profile image using hybrid storage if provided
     let profileImageUrl = null;
     if (profileImage) {
       try {
-        console.log('Uploading profile image to Cloudinary...');
-        const uploadResult = await cloudinary.uploader.upload(profileImage, {
+        console.log('Uploading profile image using hybrid storage...');
+        const uploadResult = await storeDataUri({
+          req,
+          dataUri: profileImage,
+          originalName: `user-${normalizeEmail(email)}-${Date.now()}.png`,
           folder: 'user-profiles',
-          public_id: `user-${email}-${Date.now()}`,
-          transformation: [
-            { width: 200, height: 200, crop: 'fill' },
-            { quality: 'auto' }
-          ]
+          cloudinaryOptions: {
+            folder: 'user-profiles',
+            public_id: `user-${normalizeEmail(email)}-${Date.now()}`,
+            transformation: [
+              { width: 200, height: 200, crop: 'fill' },
+              { quality: 'auto' }
+            ]
+          }
         });
-        profileImageUrl = uploadResult.secure_url;
+        profileImageUrl = uploadResult.url;
         console.log('✅ Profile image uploaded to Cloudinary:', profileImageUrl);
       } catch (uploadError) {
         console.error('❌ Cloudinary upload error:', uploadError.message);
@@ -645,7 +727,7 @@ const createUserOnboarding = async (req, res) => {
     // Create new user (verified by default - no SMS verification)
     const newUser = new User({
       name,
-      email: email.toLowerCase(),
+      email: normalizeEmail(email),
       phone,
       password: hashedPassword,
       role: normalizedRole,
@@ -662,6 +744,7 @@ const createUserOnboarding = async (req, res) => {
       if (tokenData) {
         tokenData.used = true;
       }
+      delete onboardingVerifications[getOnboardingStateKey(email, token)];
     }
 
     res.json({

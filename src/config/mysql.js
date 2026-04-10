@@ -1,6 +1,6 @@
 const mysql = require('mysql2/promise');
 
-const db = mysql.createPool({
+const pool = mysql.createPool({
   host: process.env.MYSQL_HOST || process.env.DB_HOST || 'localhost',
   port: Number(process.env.MYSQL_PORT || process.env.DB_PORT || 3306),
   user: process.env.MYSQL_USER || process.env.DB_USER,
@@ -11,4 +11,13 @@ const db = mysql.createPool({
   queueLimit: 0,
 });
 
-module.exports = db;
+async function connectMySQL() {
+  const conn = await pool.getConnection();
+  conn.release();
+  return pool;
+}
+
+module.exports = {
+  pool,
+  connectMySQL,
+};

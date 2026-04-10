@@ -41,13 +41,13 @@ router.post('/create-token', authMiddleware, roleMiddleware(['superadmin']), cre
 // GET /api/iam/resolve-token - Resolve token to get phone/role (public)
 router.get('/resolve-token', resolveToken);
 
-// POST /api/iam/send-otp - Send OTP for onboarding (public)
+// POST /api/iam/send-otp - Send OTP for onboarding (admin auth or valid token)
 router.post('/send-otp', sendOTPOnboarding);
 
-// POST /api/iam/verify-otp - Verify OTP for onboarding (public)
+// POST /api/iam/verify-otp - Verify OTP for onboarding (admin auth or valid token)
 router.post('/verify-otp-onboarding', verifyOTPOnboarding);
 
-// POST /api/iam/create-user - Create user from onboarding (public)
+// POST /api/iam/create-user - Create user from onboarding (admin auth or verified token flow)
 router.post('/create-user', createUserOnboarding);
 
 // POST /api/iam/verify-phone-otp - Verify phone OTP for onboarding (public)

@@ -1,10 +1,10 @@
 const crypto = require('crypto');
-const cloudinary = require('../config/cloudinary');
 const Result = require('../models/result.model');
 const GroupResult = require('../models/groupResult.model');
 const Player = require('../models/player.model');
 const Winner = require('../models/winner.model');
 const WinnerCaptureSession = require('../models/winnerCaptureSession.model');
+const { deleteStoredFile, storeUploadedBuffer } = require('../services/hybridStorage.service');
 
 const ALLOWED_MEDALS = ['Gold', 'Silver', 'Bronze'];
 const ALLOWED_LINK_TYPES = ['manual', 'individual', 'team'];
@@ -256,9 +256,9 @@ const destroyWinnerImage = async (publicId) => {
   if (!safePublicId) return;
 
   try {
-    await cloudinary.uploader.destroy(safePublicId);
+    await deleteStoredFile(safePublicId);
   } catch (error) {
-    console.error('Failed to delete winner image from Cloudinary:', error?.message || error);
+    console.error('Failed to delete winner image:', error?.message || error);
   }
 };
 
@@ -369,22 +369,24 @@ exports.uploadWinnerCapturePhoto = async (req, res) => {
     }
 
     const previousPublicId = String(session.imagePublicId || '').trim();
-    const base64 = file.buffer.toString('base64');
-
-    const uploadResult = await cloudinary.uploader.upload(
-      `data:${file.mimetype};base64,${base64}`,
-      {
+    const uploadResult = await storeUploadedBuffer({
+      req,
+      buffer: file.buffer,
+      mimetype: file.mimetype,
+      originalName: file.originalname || `winner-capture-${sessionId}.jpg`,
+      folder: 'winner-captures',
+      cloudinaryOptions: {
         folder: 'winner-captures',
         resource_type: 'image',
         quality: 'auto',
         fetch_format: 'auto',
         transformation: [{ width: 2000, crop: 'limit' }],
       }
-    );
+    });
 
     session.status = 'uploaded';
-    session.imageUrl = uploadResult.secure_url || '';
-    session.imagePublicId = uploadResult.public_id || '';
+    session.imageUrl = uploadResult.url || '';
+    session.imagePublicId = uploadResult.publicId || '';
     session.uploadedAt = new Date();
     await session.save();
 

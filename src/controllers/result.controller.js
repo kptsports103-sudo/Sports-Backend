@@ -1,5 +1,11 @@
 const Result = require('../models/result.model');
 const Player = require('../models/player.model');
+const { deleteStoredFile, storeUploadedBuffer } = require('../services/hybridStorage.service');
+
+const normalizeImageUrl = (value) => {
+  const safeValue = String(value || '').trim();
+  return safeValue || null;
+};
 
 exports.getResults = async (req, res) => {
   try {
@@ -24,7 +30,8 @@ exports.createResult = async (req, res) => {
       event,
       year,
       medal,
-      imageUrl
+      imageUrl,
+      imagePublicId
     } = req.body;
     const normalizedMasterId = String(playerMasterId || '').trim();
     const normalizedEvent = String(event || '').trim();
@@ -42,7 +49,6 @@ exports.createResult = async (req, res) => {
       return res.status(400).json({ message: 'Selected player not found in players master data.' });
     }
 
-    const normalizedImageUrl = req.file ? `/uploads/results/${req.file.filename}` : (imageUrl && imageUrl.trim() ? imageUrl : null);
     const resolvedDiplomaYear = Number(player.currentDiplomaYear || player.baseDiplomaYear || player.diplomaYear || null);
     if (![1, 2, 3].includes(resolvedDiplomaYear)) {
       return res.status(400).json({ message: 'Selected player has invalid diploma year in master data.' });
@@ -60,6 +66,23 @@ exports.createResult = async (req, res) => {
       });
     }
 
+    const storedImage = req.file
+      ? await storeUploadedBuffer({
+          req,
+          buffer: req.file.buffer,
+          mimetype: req.file.mimetype,
+          originalName: req.file.originalname,
+          folder: 'results',
+          cloudinaryOptions: {
+            folder: 'results',
+            resource_type: 'image',
+            quality: 'auto',
+            fetch_format: 'auto',
+            transformation: [{ width: 2000, crop: 'limit' }],
+          }
+        })
+      : null;
+
     const result = new Result({
       name: player.name || '',
       playerMasterId: normalizedMasterId,
@@ -69,7 +92,8 @@ exports.createResult = async (req, res) => {
       year: normalizedYear,
       medal,
       diplomaYear: resolvedDiplomaYear,
-      imageUrl: normalizedImageUrl,
+      imageUrl: storedImage ? storedImage.url : normalizeImageUrl(imageUrl),
+      imagePublicId: storedImage ? storedImage.publicId : String(imagePublicId || '').trim(),
     });
 
     await result.save();
@@ -158,11 +182,61 @@ exports.updateResult = async (req, res) => {
     updateData.playerMasterId = finalMasterId;
     updateData.event = finalEvent;
     updateData.year = finalYear;
+    const previousImagePublicId = String(current.imagePublicId || '').trim();
+    let shouldDeletePreviousImage = false;
 
     if (req.file) {
-      updateData.imageUrl = `/uploads/results/${req.file.filename}`;
-    } else if (updateData.imageUrl === '' || !updateData.imageUrl?.trim()) {
-      updateData.imageUrl = null;
+      const storedImage = await storeUploadedBuffer({
+        req,
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype,
+        originalName: req.file.originalname,
+        folder: 'results',
+        cloudinaryOptions: {
+          folder: 'results',
+          resource_type: 'image',
+          quality: 'auto',
+          fetch_format: 'auto',
+          transformation: [{ width: 2000, crop: 'limit' }],
+        }
+      });
+      updateData.imageUrl = storedImage.url;
+      updateData.imagePublicId = storedImage.publicId;
+      shouldDeletePreviousImage = Boolean(previousImagePublicId && previousImagePublicId !== storedImage.publicId);
+    } else {
+      const hasImageUrl = Object.prototype.hasOwnProperty.call(updateData, 'imageUrl');
+      const hasImagePublicId = Object.prototype.hasOwnProperty.call(updateData, 'imagePublicId');
+
+      if (hasImageUrl || hasImagePublicId) {
+        const nextImageUrl = hasImageUrl
+          ? normalizeImageUrl(updateData.imageUrl)
+          : normalizeImageUrl(current.imageUrl);
+        let nextImagePublicId = hasImagePublicId
+          ? String(updateData.imagePublicId || '').trim()
+          : String(current.imagePublicId || '').trim();
+
+        if (hasImageUrl && !nextImageUrl) {
+          nextImagePublicId = '';
+        }
+
+        if (
+          hasImageUrl &&
+          nextImageUrl &&
+          nextImageUrl !== normalizeImageUrl(current.imageUrl) &&
+          !hasImagePublicId
+        ) {
+          nextImagePublicId = '';
+        }
+
+        if (hasImageUrl) {
+          updateData.imageUrl = nextImageUrl;
+        }
+        if (hasImagePublicId || (hasImageUrl && !nextImageUrl) || (hasImageUrl && nextImagePublicId === '')) {
+          updateData.imagePublicId = nextImagePublicId;
+        }
+
+        shouldDeletePreviousImage = Boolean(previousImagePublicId && previousImagePublicId !== nextImagePublicId);
+      }
     }
 
     const result = await Result.findByIdAndUpdate(
@@ -175,8 +249,13 @@ exports.updateResult = async (req, res) => {
       return res.status(404).json({ message: 'Result not found' });
     }
 
+    if (shouldDeletePreviousImage) {
+      await deleteStoredFile(previousImagePublicId);
+    }
+
     res.json(result);
   } catch (error) {
+    console.error('Update result error:', error);
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: error.message });
     }
@@ -197,8 +276,10 @@ exports.deleteResult = async (req, res) => {
       return res.status(404).json({ message: 'Result not found' });
     }
 
+    await deleteStoredFile(result.imagePublicId);
     res.json({ message: 'Result deleted' });
   } catch (error) {
+    console.error('Delete result error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

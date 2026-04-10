@@ -1,86 +1,30 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const adminActivityLogSchema = new mongoose.Schema({
-  adminId: {
-    type: String,  // Store as string to avoid ObjectId type issues
-    required: true
+module.exports = createMySQLModel('AdminActivityLog', {
+  collectionName: 'admin_activity_logs',
+  timestamps: true,
+  indexes: [['adminId'], ['pageName'], ['source'], ['action']],
+  fieldTypes: {
+    details: 'text',
+    statusCode: 'integer',
+    userAgent: 'text',
   },
-  adminName: {
-    type: String,
-    required: true
+  defaults: {
+    adminId: '',
+    adminName: '',
+    adminEmail: '',
+    role: 'viewer',
+    source: 'manual',
+    action: '',
+    pageName: '',
+    ipAddress: '',
+    details: '',
+    method: '',
+    route: '',
+    clientPath: '',
+    statusCode: 0,
+    userAgent: '',
+    changes: [],
+    metadata: {},
   },
-  adminEmail: {
-    type: String,
-    default: ''
-  },
-  role: {
-    type: String,
-    enum: ['superadmin', 'admin', 'creator', 'viewer', 'coach', 'student'],
-    required: true
-  },
-  source: {
-    type: String,
-    enum: ['manual', 'api', 'navigation', 'auth', 'system'],
-    default: 'manual'
-  },
-  action: {
-    type: String,
-    required: true
-  },
-  pageName: {
-    type: String,
-    required: true
-  },
-  ipAddress: {
-    type: String,
-    default: ''
-  },
-  details: {
-    type: String,
-    default: ''
-  },
-  method: {
-    type: String,
-    default: ''
-  },
-  route: {
-    type: String,
-    default: ''
-  },
-  clientPath: {
-    type: String,
-    default: ''
-  },
-  statusCode: {
-    type: Number,
-    default: 0
-  },
-  userAgent: {
-    type: String,
-    default: ''
-  },
-  changes: {
-    type: [
-      {
-        field: { type: String, required: true },
-        before: { type: String, default: '' },
-        after: { type: String, default: '' }
-      }
-    ],
-    default: []
-  },
-  metadata: {
-    type: mongoose.Schema.Types.Mixed,
-    default: {}
-  }
-}, { timestamps: true });
-
-// Index for faster queries
-adminActivityLogSchema.index({ adminId: 1, createdAt: -1 });
-adminActivityLogSchema.index({ createdAt: -1 });
-adminActivityLogSchema.index({ source: 1, createdAt: -1 });
-adminActivityLogSchema.index({ role: 1, createdAt: -1 });
-// Auto-delete logs permanently after 30 days
-adminActivityLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
-
-module.exports = mongoose.model('AdminActivityLog', adminActivityLogSchema);
+});

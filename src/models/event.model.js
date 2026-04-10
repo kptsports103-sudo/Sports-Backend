@@ -1,118 +1,44 @@
-const mongoose = require('mongoose');
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
 
-const eventSchema = new mongoose.Schema({
-  // Modern Sports Meet fields
-  eventName: {
-    type: String,
-    trim: true,
+module.exports = createMySQLModel('Event', {
+  collectionName: 'events',
+  timestamps: true,
+  indexes: [['eventName'], ['event_title'], ['sportType'], ['eventType']],
+  fieldTypes: {
+    teamSizeMin: 'integer',
+    teamSizeMax: 'integer',
+    overall_champion_points: 'integer',
+    runner_up_points: 'integer',
+    news_highlight: 'text',
   },
-  category: {
-    type: String,
-    enum: ['Indoor', 'Outdoor'],
-  },
-  sportType: {
-    type: String,
-    default: 'Athletics',
-  },
-  eventType: {
-    type: String,
-    enum: ['Individual', 'Team'],
-    default: 'Individual',
-  },
-  level: {
-    type: String,
-    default: '',
-  },
-  gender: {
-    type: String,
-    default: 'Mixed',
-  },
-  date: {
-    type: String,
-  },
-  eventDate: {
-    type: String,
-    default: 'TBA',
-  },
-  eventTime: {
-    type: String,
-    default: 'TBA',
-  },
-  registrationStartDate: {
-    type: String,
-    default: 'TBA',
-  },
-  registrationEndDate: {
-    type: String,
-    default: 'TBA',
-  },
-  teamSizeMin: {
-    type: Number,
-    default: null,
-  },
-  teamSizeMax: {
-    type: Number,
-    default: null,
-  },
-  registrationStatus: {
-    type: String,
-    enum: ['Open', 'Closed'],
-    default: 'Closed',
-  },
-
-  // Legacy fields kept for compatibility
-  event_title: {
-    type: String,
-    required: true,
-  },
-  event_level: {
-    type: String,
-    default: '',
-  },
-  event_date: {
-    type: String,
-  },
-  venue: {
-    type: String,
-  },
-  city: {
-    type: String,
-  },
-  overall_champion: {
-    type: String,
-  },
-  overall_champion_points: {
-    type: Number,
-  },
-  runner_up: {
-    type: String,
-  },
-  runner_up_points: {
-    type: Number,
-  },
-  mens_individual_champion: {
-    type: String,
-  },
-  mens_champion_institution: {
-    type: String,
-  },
-  womens_individual_champion: {
-    type: String,
-  },
-  womens_champion_institution: {
-    type: String,
-  },
-  news_highlight: {
-    type: String,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
+  defaults: {
+    eventName: '',
+    category: '',
+    sportType: 'Athletics',
+    eventType: 'Individual',
+    level: '',
+    gender: 'Mixed',
+    date: '',
+    eventDate: 'TBA',
+    eventTime: 'TBA',
+    registrationStartDate: 'TBA',
+    registrationEndDate: 'TBA',
+    teamSizeMin: null,
+    teamSizeMax: null,
+    registrationStatus: 'Closed',
+    event_title: '',
+    event_level: '',
+    event_date: '',
+    venue: '',
+    city: '',
+    overall_champion: '',
+    overall_champion_points: null,
+    runner_up: '',
+    runner_up_points: null,
+    mens_individual_champion: '',
+    mens_champion_institution: '',
+    womens_individual_champion: '',
+    womens_champion_institution: '',
+    news_highlight: '',
   },
 });
-
-module.exports = mongoose.model('Event', eventSchema);
