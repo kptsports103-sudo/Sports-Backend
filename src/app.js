@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 
+const { pool } = require('./config/mysql');
 const { ensureMySQLReady } = require('./config/mysqlReady');
 
 // Routes
@@ -30,30 +31,74 @@ const errorMiddleware = require('./middlewares/error.middleware');
 
 const app = express();
 
+const trimTrailingSlash = (value = '') => String(value || '').trim().replace(/\/+$/, '');
+
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
+  'https://localhost:5173',
+  'https://localhost:5174',
+  'https://localhost:5175',
+  'https://localhost:5176',
+  'https://localhost:5180',
+  'https://kpt-sports-frontend.vercel.app',
+];
+
+const envAllowedOrigins = [
+  process.env.FRONTEND_URL,
+  ...(process.env.CORS_ORIGINS || '').split(','),
+]
+  .map(trimTrailingSlash)
+  .filter(Boolean);
+
+const allowedOrigins = new Set(
+  [...defaultAllowedOrigins, ...envAllowedOrigins].map(trimTrailingSlash).filter(Boolean)
+);
+
+const vercelPreviewOriginPatterns = [
+  /^https:\/\/kpt-sports-frontend(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+  /^https:\/\/sports-frontend(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+];
+
+const isAllowedOrigin = (origin = '') => {
+  const normalizedOrigin = trimTrailingSlash(origin);
+
+  if (!normalizedOrigin) {
+    return true;
+  }
+
+  if (allowedOrigins.has(normalizedOrigin)) {
+    return true;
+  }
+
+  return vercelPreviewOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
+};
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`[cors] blocked origin: ${origin}`);
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Accept', 'Authorization', 'Content-Type', 'X-Client-Path'],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+
 /* ------------- Middleware ------------ */
 app.use(helmet());
 app.use(morgan('dev'));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-app.use(
-  cors({
-    origin: [
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://localhost:5175',
-      'http://localhost:5176',
-      'https://localhost:5173',
-      'https://localhost:5174',
-      'https://localhost:5175',
-      'https://localhost:5176',
-      'https://localhost:5180',
-      'https://kpt-sports-frontend.vercel.app',
-    ],
-    credentials: true,
-  })
-);
 
 /* ---------------- Health ------------- */
 // Always fast, never blocked by DB
@@ -69,6 +114,28 @@ app.get('/healthz', (req, res) => {
   });
 });
 
+app.get('/health/db', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT 1 AS ok');
+
+    res.status(200).json({
+      status: 'ok',
+      db: 'mysql',
+      result: rows[0] || { ok: 1 },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('DB health check failed:', error);
+    res.status(503).json({
+      status: 'error',
+      db: 'mysql',
+      message: 'Database unavailable',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Suppress favicon 404s
 app.get('/favicon.ico', (_, res) => res.status(204).end());
 app.get('/favicon.png', (_, res) => res.status(204).end());
@@ -76,6 +143,10 @@ app.get('/favicon.png', (_, res) => res.status(204).end());
 /* -------------- API Routes with DB Guard ----------- */
 // Database readiness guard - await connection for API routes
 app.use('/api', async (req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+
   try {
     await ensureMySQLReady();
     next();
