@@ -2,13 +2,14 @@ const normalizeTimelineRow = (row = {}) => ({
   year: String(row?.year || '').trim(),
   host: String(row?.host || '').trim(),
   venue: String(row?.venue || '').trim(),
+  studentsSelected: String(row?.studentsSelected || '').trim(),
   fixed: Boolean(row?.fixed),
 });
 
 const normalizeTimelineRows = (rows = []) =>
   (Array.isArray(rows) ? rows : [])
     .map((row) => normalizeTimelineRow(row))
-    .filter((row) => row.year || row.host || row.venue);
+    .filter((row) => row.year || row.host || row.venue || row.studentsSelected);
 
 const createEmptyHistoryTimeline = () => ({
   state: [],
