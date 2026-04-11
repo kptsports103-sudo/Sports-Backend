@@ -12,6 +12,7 @@ const {
   MAX_KPM_SEQUENCE
 } = require('../services/kpmSequence.service');
 const { storeUploadedBuffer } = require('../services/hybridStorage.service');
+const { getHistoryTimelineTotal, normalizeHistoryTimeline } = require('../utils/historyTimeline');
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -25,7 +26,7 @@ const normalizeAchievementSettings = (settings = {}) => ({
 });
 
 const getSportsMeetsConductedValue = (timeline = []) =>
-  String(Array.isArray(timeline) ? timeline.length : 0);
+  String(getHistoryTimelineTotal(timeline));
 
 const getYearsOfExcellenceValue = (timeline = []) => {
   const sportsCount = Number(getSportsMeetsConductedValue(timeline) || 0);
@@ -386,7 +387,7 @@ exports.getAboutTimeline = async (req, res) => {
       home = new Home();
       await home.save();
     }
-    res.json({ timeline: home.timeline || [] });
+    res.json({ timeline: normalizeHistoryTimeline(home.timeline) });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -395,7 +396,7 @@ exports.getAboutTimeline = async (req, res) => {
 
 exports.updateAboutTimeline = async (req, res) => {
   try {
-    const { timeline } = req.body;
+    const timeline = normalizeHistoryTimeline(req.body?.timeline);
     console.log('Received timeline update:', timeline);
     let home = await Home.findOne();
     if (!home) {

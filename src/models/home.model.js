@@ -32,6 +32,9 @@ module.exports = createMySQLModel('Home', {
     boxes: [],
     bigHeader: '',
     bigText: '',
-    timeline: [],
+    timeline: {
+      state: [],
+      national: [],
+    },
   },
 });
