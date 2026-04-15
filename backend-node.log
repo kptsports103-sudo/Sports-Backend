@@ -2,9 +2,3 @@ MySQL connected successfully
 🚀 Server running on http://localhost:4000
 📝 API available at http://localhost:4000/api/v1
 🔗 Home CMS API: http://localhost:4000/api/v1/home
-[0mGET /healthz [32m200[0m 17.451 ms - 67[0m
-[0mGET /health/db [32m200[0m 272.676 ms - 85[0m
-[0mGET /api/v1/results?level=state [32m200[0m 966.688 ms - 8399[0m
-[0mGET /api/v1/group-results?level=state [32m200[0m 1086.937 ms - 7895[0m
-[0mGET /api/v1/group-results?level=national [32m200[0m 85.400 ms - 2[0m
-[0mGET /api/v1/results?level=national [32m200[0m 68.253 ms - 2[0m

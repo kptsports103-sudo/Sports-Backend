@@ -13,6 +13,13 @@ const CLOUDINARY_STORAGE_LIMIT_BYTES = Number(process.env.CLOUDINARY_STORAGE_LIM
 const CLOUDINARY_USAGE_CACHE_TTL_MS = Number(process.env.CLOUDINARY_USAGE_CACHE_TTL_MS || 5 * 60 * 1000);
 const CLOUDINARY_FORCE_MYSQL_TTL_MS = Number(process.env.CLOUDINARY_FORCE_MYSQL_TTL_MS || 15 * 60 * 1000);
 
+const isMySQLOnlyStorage = () => {
+  const provider = String(process.env.MEDIA_STORAGE_PROVIDER || '').trim().toLowerCase();
+  const mysqlOnly = String(process.env.MYSQL_ONLY_MEDIA_STORAGE || '').trim();
+
+  return provider === 'mysql' || /^(1|true|yes|on)$/i.test(mysqlOnly);
+};
+
 let ensureAssetTablePromise = null;
 const cloudinaryStatus = {
   checkedAt: 0,
@@ -197,11 +204,15 @@ const getMySQLAssetStats = async () => {
 };
 
 const getStoragePolicySnapshot = () => ({
+  storageProvider: isMySQLOnlyStorage() ? 'mysql' : 'hybrid',
+  cloudinaryEnabledForUploads: !isMySQLOnlyStorage(),
   smallImageMaxBytes: SMALL_IMAGE_MAX_BYTES,
   cloudinaryStorageLimitBytes: CLOUDINARY_STORAGE_LIMIT_BYTES,
-  cloudinaryPreferredFor: 'Small images only',
-  mysqlPreferredFor: 'Large images, videos, audio, PDFs, and other documents',
-  fallbackToMySQLWhenCloudinaryFull: true,
+  cloudinaryPreferredFor: isMySQLOnlyStorage() ? 'Disabled for new uploads' : 'Small images only',
+  mysqlPreferredFor: isMySQLOnlyStorage()
+    ? 'All uploads'
+    : 'Large images, videos, audio, PDFs, and other documents',
+  fallbackToMySQLWhenCloudinaryFull: !isMySQLOnlyStorage(),
   cloudinaryTemporaryFallbackActive:
     Boolean(cloudinaryStatus.forceMySQLUntil && cloudinaryStatus.forceMySQLUntil > Date.now()),
   cloudinaryFallbackUntil: cloudinaryStatus.forceMySQLUntil
@@ -256,6 +267,7 @@ const canUseCloudinary = async () => {
 };
 
 const shouldUseCloudinary = async ({ mimetype, sizeBytes, allowCloudinary = true }) => {
+  if (isMySQLOnlyStorage()) return false;
   if (!allowCloudinary) return false;
   if (!String(mimetype || '').toLowerCase().startsWith('image/')) return false;
   if (normalizeNumber(sizeBytes, 0) > SMALL_IMAGE_MAX_BYTES) return false;
@@ -535,6 +547,7 @@ module.exports = {
   getMySQLAssetStats,
   getStoragePolicySnapshot,
   hasCloudinaryCredentials,
+  isMySQLOnlyStorage,
   parsePublicId,
   storeDataUri,
   storeUploadedBuffer,
