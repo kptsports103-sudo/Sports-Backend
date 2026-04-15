@@ -9,10 +9,11 @@ const {
 
 const authMiddleware = require('../middlewares/auth.middleware');
 const roleMiddleware = require('../middlewares/role.middleware');
+const upload = require('../middlewares/upload.middleware');
 
 router.get('/', getGroupResults);
-router.post('/', authMiddleware, roleMiddleware(['creator']), createGroupResult);
-router.put('/:id', authMiddleware, roleMiddleware(['creator']), updateGroupResult);
+router.post('/', authMiddleware, roleMiddleware(['creator']), upload.single('image'), createGroupResult);
+router.put('/:id', authMiddleware, roleMiddleware(['creator']), upload.single('image'), updateGroupResult);
 router.delete('/:id', authMiddleware, roleMiddleware(['admin']), deleteGroupResult);
 
 module.exports = router;

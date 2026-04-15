@@ -42,6 +42,8 @@ router.post('/', authMiddleware, upload.array('files'), async (req, res) => {
       url: result.url,
       public_id: result.publicId,
       storage: result.storage,
+      resource_type: result.resourceType,
+      mime_type: result.mimeType,
     }));
 
     res.json({ success: true, files });

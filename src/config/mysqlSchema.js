@@ -7,6 +7,7 @@ const GroupResult = require('../models/groupResult.model');
 const Home = require('../models/home.model');
 const KpmPool = require('../models/kpmPool.model');
 const MediaActivity = require('../models/mediaActivity.model');
+const MediaItem = require('../models/mediaItem.model');
 const OTP = require('../models/otp.model');
 const Player = require('../models/player.model');
 const Registration = require('../models/registration.model');
@@ -28,6 +29,7 @@ const runtimeModels = [
   Home,
   KpmPool,
   MediaActivity,
+  MediaItem,
   OTP,
   Player,
   Registration,

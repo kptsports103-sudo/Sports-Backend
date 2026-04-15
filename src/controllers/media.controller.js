@@ -1,7 +1,9 @@
 const cloudinary = require('../config/cloudinary');
 const MediaActivity = require('../models/mediaActivity.model');
+const MediaItem = require('../models/mediaItem.model');
 const {
   CLOUDINARY_STORAGE_LIMIT_BYTES: STORAGE_LIMIT_BYTES,
+  deleteStoredFile,
   getMySQLAssetStats,
   getStoragePolicySnapshot,
   hasCloudinaryCredentials,
@@ -24,6 +26,143 @@ const normalizeUsageValue = (value) => {
   if (typeof value === 'number') return value;
   if (value && typeof value === 'object') return Number(value.usage || 0);
   return 0;
+};
+
+const normalizeMediaFiles = (files = []) => {
+  if (!Array.isArray(files)) return [];
+
+  return files
+    .map((file) => {
+      if (typeof file === 'string') {
+        return { url: file, public_id: '', storage: '' };
+      }
+
+      if (!file || typeof file !== 'object') {
+        return null;
+      }
+
+      return {
+        url: String(file.url || ''),
+        public_id: String(file.public_id || file.publicId || ''),
+        storage: String(file.storage || ''),
+        resource_type: String(file.resource_type || file.resourceType || ''),
+        mime_type: String(file.mime_type || file.mimeType || ''),
+      };
+    })
+    .filter((file) => file && file.url);
+};
+
+const normalizeMediaDocument = (media) => {
+  const mediaObject = typeof media?.toObject === 'function' ? media.toObject() : media;
+  return {
+    ...mediaObject,
+    id: mediaObject?._id || mediaObject?.id,
+    category: String(mediaObject?.category || ''),
+    title: String(mediaObject?.title || ''),
+    description: String(mediaObject?.description || ''),
+    link: String(mediaObject?.link || ''),
+    files: normalizeMediaFiles(mediaObject?.files),
+  };
+};
+
+const buildMediaPayload = (body = {}) => ({
+  category: String(body.category || '').trim(),
+  title: String(body.title || '').trim(),
+  description: String(body.description || '').trim(),
+  link: String(body.link || '').trim(),
+  files: normalizeMediaFiles(body.files),
+});
+
+const getMediaItems = async (req, res) => {
+  try {
+    const mediaItems = await MediaItem.find().sort({ createdAt: -1 });
+    return res.json(mediaItems.map(normalizeMediaDocument));
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load media',
+      error: error.message,
+    });
+  }
+};
+
+const createMediaItem = async (req, res) => {
+  try {
+    const payload = buildMediaPayload(req.body);
+
+    if (!payload.category) {
+      return res.status(400).json({ success: false, message: 'Category is required' });
+    }
+
+    if (!payload.link && payload.files.length === 0) {
+      return res.status(400).json({ success: false, message: 'A link or uploaded file is required' });
+    }
+
+    const mediaItem = new MediaItem(payload);
+    await mediaItem.save();
+
+    return res.status(201).json(normalizeMediaDocument(mediaItem));
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to save media',
+      error: error.message,
+    });
+  }
+};
+
+const updateMediaItem = async (req, res) => {
+  try {
+    const payload = buildMediaPayload(req.body);
+    const mediaItem = await MediaItem.findByIdAndUpdate(req.params.id, payload, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!mediaItem) {
+      return res.status(404).json({ success: false, message: 'Media item not found' });
+    }
+
+    return res.json(normalizeMediaDocument(mediaItem));
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update media',
+      error: error.message,
+    });
+  }
+};
+
+const deleteMediaItem = async (req, res) => {
+  try {
+    const mediaItem = await MediaItem.findByIdAndDelete(req.params.id);
+
+    if (!mediaItem) {
+      return res.status(404).json({ success: false, message: 'Media item not found' });
+    }
+
+    const normalized = normalizeMediaDocument(mediaItem);
+    await Promise.all(
+      normalized.files
+        .map((file) => file.public_id)
+        .filter(Boolean)
+        .map(async (publicId) => {
+          try {
+            await deleteStoredFile(publicId);
+          } catch (error) {
+            console.warn('Failed to delete stored media file:', error?.message || error);
+          }
+        })
+    );
+
+    return res.json({ success: true, message: 'Media item deleted' });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete media',
+      error: error.message,
+    });
+  }
 };
 
 const countCloudinaryResourcesByType = async (resourceType) => {
@@ -439,9 +578,13 @@ const getMediaHeatmap = async (req, res) => {
 };
 
 module.exports = {
+  createMediaItem,
+  deleteMediaItem,
   getCloudinaryUsage,
   getCloudinaryStats,
+  getMediaItems,
   logMediaActivity,
   predictMediaUsage,
   getMediaHeatmap,
+  updateMediaItem,
 };

@@ -1,6 +1,8 @@
 const Result = require('../models/result.model');
 const Player = require('../models/player.model');
 const { deleteStoredFile, storeUploadedBuffer } = require('../services/hybridStorage.service');
+const { normalizeResultLevel } = require('../utils/resultLevels');
+const { ensureResultLevelStorage } = require('../utils/resultStorageMigration');
 
 const normalizeImageUrl = (value) => {
   const safeValue = String(value || '').trim();
@@ -9,10 +11,12 @@ const normalizeImageUrl = (value) => {
 
 exports.getResults = async (req, res) => {
   try {
-    const { year, medal, search } = req.query;
+    await ensureResultLevelStorage({ Result });
+    const { year, medal, search, level } = req.query;
 
     const query = {};
     if (year && year !== 'all') query.year = Number(year);
+    if (level && level !== 'all') query.level = normalizeResultLevel(level);
     if (medal && medal !== 'all') query.medal = medal;
     if (search) query.name = new RegExp(search, 'i');
 
@@ -29,13 +33,16 @@ exports.createResult = async (req, res) => {
       playerMasterId,
       event,
       year,
+      level,
       medal,
       imageUrl,
       imagePublicId
     } = req.body;
+    await ensureResultLevelStorage({ Result });
     const normalizedMasterId = String(playerMasterId || '').trim();
     const normalizedEvent = String(event || '').trim();
     const normalizedYear = Number(year);
+    const normalizedLevel = normalizeResultLevel(level);
 
     if (!normalizedMasterId || !normalizedEvent || !normalizedYear || !medal) {
       return res.status(400).json({ message: 'playerMasterId, event, year and medal are required.' });
@@ -57,12 +64,13 @@ exports.createResult = async (req, res) => {
     const existing = await Result.findOne({
       playerMasterId: normalizedMasterId,
       event: normalizedEvent,
-      year: normalizedYear
+      year: normalizedYear,
+      level: normalizedLevel
     }).lean();
 
     if (existing) {
       return res.status(400).json({
-        message: 'Result already exists for this player in this event.'
+        message: 'Result already exists for this player in this event and level.'
       });
     }
 
@@ -90,6 +98,7 @@ exports.createResult = async (req, res) => {
       branch: player.branch || '',
       event: normalizedEvent,
       year: normalizedYear,
+      level: normalizedLevel,
       medal,
       diplomaYear: resolvedDiplomaYear,
       imageUrl: storedImage ? storedImage.url : normalizeImageUrl(imageUrl),
@@ -105,7 +114,7 @@ exports.createResult = async (req, res) => {
     }
     if (error?.code === 11000) {
       return res.status(400).json({
-        message: 'Result already exists for this player in this event.'
+        message: 'Result already exists for this player in this event and level.'
       });
     }
     res.status(500).json({ message: 'Server error' });
@@ -114,9 +123,13 @@ exports.createResult = async (req, res) => {
 
 exports.updateResult = async (req, res) => {
   try {
+    await ensureResultLevelStorage({ Result });
     const updateData = { ...req.body };
     if (Object.prototype.hasOwnProperty.call(updateData, 'event')) {
       updateData.event = String(updateData.event || '').trim();
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'level')) {
+      updateData.level = normalizeResultLevel(updateData.level);
     }
     if (Object.prototype.hasOwnProperty.call(updateData, 'year')) {
       updateData.year = Number(updateData.year);
@@ -161,6 +174,9 @@ exports.updateResult = async (req, res) => {
     const finalYear = Object.prototype.hasOwnProperty.call(updateData, 'year')
       ? Number(updateData.year)
       : Number(current.year);
+    const finalLevel = Object.prototype.hasOwnProperty.call(updateData, 'level')
+      ? normalizeResultLevel(updateData.level)
+      : normalizeResultLevel(current.level);
 
     if (!finalMasterId || !finalEvent || !finalYear) {
       return res.status(400).json({ message: 'playerMasterId, event and year are required.' });
@@ -170,18 +186,20 @@ exports.updateResult = async (req, res) => {
       _id: { $ne: req.params.id },
       playerMasterId: finalMasterId,
       event: finalEvent,
-      year: finalYear
+      year: finalYear,
+      level: finalLevel
     }).lean();
 
     if (duplicate) {
       return res.status(400).json({
-        message: 'Result already exists for this player in this event.'
+        message: 'Result already exists for this player in this event and level.'
       });
     }
 
     updateData.playerMasterId = finalMasterId;
     updateData.event = finalEvent;
     updateData.year = finalYear;
+    updateData.level = finalLevel;
     const previousImagePublicId = String(current.imagePublicId || '').trim();
     let shouldDeletePreviousImage = false;
 
@@ -261,7 +279,7 @@ exports.updateResult = async (req, res) => {
     }
     if (error?.code === 11000) {
       return res.status(400).json({
-        message: 'Result already exists for this player in this event.'
+        message: 'Result already exists for this player in this event and level.'
       });
     }
     res.status(500).json({ message: 'Server error' });
