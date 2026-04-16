@@ -97,7 +97,7 @@ const corsOptions = {
     return callback(null, false);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Accept', 'Authorization', 'Content-Type', 'X-Client-Path'],
+  allowedHeaders: ['Accept', 'Authorization', 'Content-Type', 'X-Client-Path', 'X-Secret-Key-Token'],
   credentials: true,
   optionsSuccessStatus: 204,
 };

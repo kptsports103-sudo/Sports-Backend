@@ -7,6 +7,11 @@ const {
   verifySecretKeyForSession,
   verifySecretKeySetupOTP,
 } = require('../services/accountSecurity.service');
+const {
+  getAdminNotepadPage,
+  listAdminNotepadPages,
+  saveAdminNotepadPage,
+} = require('../services/adminNotepad.service');
 
 exports.getMe = async (req, res) => {
   try {
@@ -73,6 +78,45 @@ exports.saveDashboardRevealName = async (req, res) => {
     res.status(error?.statusCode || 500).json({
       code: error?.code || 'DASHBOARD_VALUE_SAVE_FAILED',
       message: error?.message || 'Failed to save dashboard value',
+    });
+  }
+};
+
+exports.getAdminNotepadOverview = async (req, res) => {
+  try {
+    const result = await listAdminNotepadPages(req.user.id);
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to load admin notepad overview:', error);
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'ADMIN_NOTEPAD_OVERVIEW_FAILED',
+      message: error?.message || 'Failed to load admin notepad overview',
+    });
+  }
+};
+
+exports.getAdminNotepadPage = async (req, res) => {
+  try {
+    const result = await getAdminNotepadPage(req.user.id, req.params?.pageNumber);
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to load admin notepad page:', error);
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'ADMIN_NOTEPAD_PAGE_FAILED',
+      message: error?.message || 'Failed to load admin notepad page',
+    });
+  }
+};
+
+exports.saveAdminNotepadPage = async (req, res) => {
+  try {
+    const result = await saveAdminNotepadPage(req.user.id, req.params?.pageNumber, req.body || {});
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to save admin notepad page:', error);
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'ADMIN_NOTEPAD_SAVE_FAILED',
+      message: error?.message || 'Failed to save admin notepad page',
     });
   }
 };

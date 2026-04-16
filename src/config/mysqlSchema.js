@@ -1,3 +1,4 @@
+const AdminNotepadPage = require('../models/adminNotepadPage.model');
 const AdminActivityLog = require('../models/adminActivityLog.model');
 const Attendance = require('../models/attendance.model');
 const Certificate = require('../models/certificate.model');
@@ -21,6 +22,7 @@ const Visitor = require('../../models/visitor.model');
 
 const runtimeModels = [
   AdminActivityLog,
+  AdminNotepadPage,
   Attendance,
   Certificate,
   Event,

@@ -29,5 +29,23 @@ router.patch(
   roleMiddleware(['creator', 'admin', 'superadmin']),
   meController.saveDashboardRevealName
 );
+router.get(
+  '/darya-notepad',
+  authMiddleware,
+  roleMiddleware(['creator', 'admin', 'superadmin']),
+  meController.getAdminNotepadOverview
+);
+router.get(
+  '/darya-notepad/:pageNumber',
+  authMiddleware,
+  roleMiddleware(['creator', 'admin', 'superadmin']),
+  meController.getAdminNotepadPage
+);
+router.put(
+  '/darya-notepad/:pageNumber',
+  authMiddleware,
+  roleMiddleware(['creator', 'admin', 'superadmin']),
+  meController.saveAdminNotepadPage
+);
 
 module.exports = router;
