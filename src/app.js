@@ -13,6 +13,7 @@ const { ensureMySQLReady } = require('./config/mysqlReady');
 const authRoutes = require('./routes/auth.routes');
 const iamRoutes = require('./routes/iam.routes');
 const homeRoutes = require('./routes/home.routes');
+const archiveRoutes = require('./routes/archive.routes');
 const meRoutes = require('./routes/me.routes');
 const eventRoutes = require('./routes/event.routes');
 const registrationRoutes = require('./routes/registration.routes');
@@ -106,6 +107,7 @@ const routeMounts = [
   ['/auth', authRoutes],
   ['/iam', iamRoutes],
   ['/home', homeRoutes],
+  ['/archive', archiveRoutes],
   ['/me', meRoutes],
   ['/events', eventRoutes],
   ['/registrations', registrationRoutes],
