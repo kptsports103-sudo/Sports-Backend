@@ -3,6 +3,7 @@ const {
   buildAuthUserPayload,
   ensureDashboardRevealName,
   requestSecretKeySetupOTP,
+  updateDashboardRevealName,
   verifySecretKeyForSession,
   verifySecretKeySetupOTP,
 } = require('../services/accountSecurity.service');
@@ -59,6 +60,19 @@ exports.verifySecretKey = async (req, res) => {
     res.status(error?.statusCode || 500).json({
       code: error?.code || 'SECRET_KEY_VERIFY_FAILED',
       message: error?.message || 'Failed to verify secret key',
+    });
+  }
+};
+
+exports.saveDashboardRevealName = async (req, res) => {
+  try {
+    const result = await updateDashboardRevealName(req.user.id, req.body?.dashboardRevealName);
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to save dashboard reveal name:', error);
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'DASHBOARD_VALUE_SAVE_FAILED',
+      message: error?.message || 'Failed to save dashboard value',
     });
   }
 };

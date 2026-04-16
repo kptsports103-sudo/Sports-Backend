@@ -180,6 +180,7 @@ const buildAutomaticDetails = ({ req, statusCode, clientPath }) => {
             'confirmsecretkey',
             'secretkeytoken',
             'passwordresetotp',
+            'dashboardrevealname',
           ].includes(String(key).replace(/[^a-z]/gi, '').toLowerCase())
       )
     : [];

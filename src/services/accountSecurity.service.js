@@ -11,6 +11,7 @@ const OTP_TTL_MS = 5 * 60 * 1000;
 const SECRET_KEY_MIN_LENGTH = 4;
 const SECRET_KEY_MAX_LENGTH = 64;
 const PASSWORD_MIN_LENGTH = 6;
+const DASHBOARD_REVEAL_NAME_MAX_LENGTH = 80;
 const parsedSecretKeySessionTtl = Number(process.env.SECRET_KEY_SESSION_TTL_SECONDS || 15 * 60);
 const SECRET_KEY_JWT_TTL = Number.isFinite(parsedSecretKeySessionTtl) ? parsedSecretKeySessionTtl : 15 * 60;
 const SECRET_KEY_JWT_SECRET = process.env.SECRET_KEY_SESSION_SECRET || process.env.JWT_SECRET;
@@ -308,6 +309,38 @@ const resetPasswordWithOTP = async ({ email, otp, newPassword, role }) => {
   };
 };
 
+const updateDashboardRevealName = async (userId, value) => {
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw createSecurityError('User not found', 404, 'USER_NOT_FOUND');
+  }
+
+  const normalizedValue = String(value || '').trim();
+  if (!normalizedValue) {
+    throw createSecurityError('Enter a value to store for this admin.', 400, 'DASHBOARD_VALUE_REQUIRED');
+  }
+
+  if (normalizedValue.length > DASHBOARD_REVEAL_NAME_MAX_LENGTH) {
+    throw createSecurityError(
+      `Dashboard value must be ${DASHBOARD_REVEAL_NAME_MAX_LENGTH} characters or less.`,
+      400,
+      'DASHBOARD_VALUE_TOO_LONG'
+    );
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
+    user._id,
+    { dashboardRevealName: normalizedValue },
+    { new: true }
+  );
+
+  return {
+    message: 'Admin dashboard value saved successfully.',
+    user: buildAuthUserPayload(updatedUser || user),
+  };
+};
+
 module.exports = {
   ensureDashboardRevealName,
   buildAuthUserPayload,
@@ -317,6 +350,7 @@ module.exports = {
   requestPasswordResetOTP,
   requestSecretKeySetupOTP,
   resetPasswordWithOTP,
+  updateDashboardRevealName,
   verifySecretKeyForSession,
   verifySecretKeySessionToken,
   verifySecretKeySetupOTP,

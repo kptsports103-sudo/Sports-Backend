@@ -23,5 +23,11 @@ router.post(
   roleMiddleware(['creator', 'admin', 'superadmin']),
   meController.verifySecretKey
 );
+router.patch(
+  '/dashboard-reveal-name',
+  authMiddleware,
+  roleMiddleware(['creator', 'admin', 'superadmin']),
+  meController.saveDashboardRevealName
+);
 
 module.exports = router;
