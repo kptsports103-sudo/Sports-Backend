@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const { createActivityLogEntry } = require('../services/activityLog.service');
 const {
   buildAuthUserPayload,
+  ensureDashboardRevealName,
   requestPasswordResetOTP,
   resetPasswordWithOTP,
 } = require('../services/accountSecurity.service');
@@ -119,6 +120,8 @@ exports.clerkLogin = async (req, res) => {
       await user.save();
     }
 
+    user = await ensureDashboardRevealName(user);
+
     // Generate JWT
     const jwtToken = jwt.sign(
       { id: user._id, email: user.email, role: user.role },
@@ -165,10 +168,11 @@ exports.registerAdmin = async (req, res) => {
     });
     
     await user.save();
+    const savedUser = await ensureDashboardRevealName(user);
     
     res.status(201).json({ 
       message: 'Admin user created successfully',
-      user: buildAuthUserPayload(user),
+      user: buildAuthUserPayload(savedUser),
     });
   } catch (error) {
     console.error('Register admin error:', error);

@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('./models/user.model');
 const otpService = require('./services/otp.service');
 const emailService = require('./services/email.service');
-const { buildAuthUserPayload } = require('./services/accountSecurity.service');
+const { buildAuthUserPayload, ensureDashboardRevealName } = require('./services/accountSecurity.service');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeOtp = (value) => String(value || '').replace(/\D/g, '').trim();
@@ -73,6 +73,8 @@ const loginUser = async (email, password, role) => {
     );
   }
 
+  user = await ensureDashboardRevealName(user);
+
   if (['superadmin', 'admin', 'creator'].includes(normalizedUserRole)) {
     await generateOTPForUser(user, normalizedEmail);
     return {
@@ -123,13 +125,14 @@ const verifyUserOTP = async (email, otp) => {
     }
 
     const users = await User.find({ email: normalizedEmail });
-    const user = users.find((candidate) => String(candidate?.otp || '') === normalizedOtp);
+    const matchedUser = users.find((candidate) => String(candidate?.otp || '') === normalizedOtp);
 
-    if (!user || !user.otp_expires_at || new Date(user.otp_expires_at) < new Date()) {
+    if (!matchedUser || !matchedUser.otp_expires_at || new Date(matchedUser.otp_expires_at) < new Date()) {
       throw createAuthError('Invalid or expired OTP', 400, 'INVALID_OTP');
     }
     // Clear OTP
-    await User.findByIdAndUpdate(user._id, { otp: null, otp_expires_at: null, is_verified: true });
+    await User.findByIdAndUpdate(matchedUser._id, { otp: null, otp_expires_at: null, is_verified: true });
+    const user = await ensureDashboardRevealName(matchedUser);
     // Generate JWT
     const token = jwt.sign(
       { id: user._id, role: user.role },

@@ -33,6 +33,24 @@ const ensureSecretKeyJwtSecret = () => {
   }
 };
 
+const ensureDashboardRevealName = async (user) => {
+  if (!user?._id) {
+    return user;
+  }
+
+  if (String(user.dashboardRevealName || '').trim()) {
+    return user;
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
+    user._id,
+    { dashboardRevealName: 'Darya' },
+    { new: true }
+  );
+
+  return updatedUser || user;
+};
+
 const buildAuthUserPayload = (user) => ({
   id: user?._id,
   email: user?.email || '',
@@ -40,6 +58,7 @@ const buildAuthUserPayload = (user) => ({
   name: user?.name || '',
   profileImage: user?.profileImage || '',
   hasSecretKey: Boolean(user?.secretKeyHash),
+  dashboardRevealName: String(user?.dashboardRevealName || 'Darya').trim() || 'Darya',
 });
 
 const findSingleUserByEmail = async (email, role) => {
@@ -290,6 +309,7 @@ const resetPasswordWithOTP = async ({ email, otp, newPassword, role }) => {
 };
 
 module.exports = {
+  ensureDashboardRevealName,
   buildAuthUserPayload,
   createSecurityError,
   createSecretKeySessionToken,
