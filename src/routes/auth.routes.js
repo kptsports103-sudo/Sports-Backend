@@ -12,4 +12,8 @@ router.post('/verify-otp', authController.verifyOTP);
 /* CLERK LOGIN */
 router.post('/clerk-login', authController.clerkLogin);
 
+/* FORGOT PASSWORD */
+router.post('/forgot-password/request-otp', authController.requestForgotPasswordOTP);
+router.post('/forgot-password/reset', authController.resetForgottenPassword);
+
 module.exports = router;

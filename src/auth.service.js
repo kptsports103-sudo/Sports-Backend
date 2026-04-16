@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('./models/user.model');
 const otpService = require('./services/otp.service');
 const emailService = require('./services/email.service');
+const { buildAuthUserPayload } = require('./services/accountSecurity.service');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeOtp = (value) => String(value || '').replace(/\D/g, '').trim();
@@ -76,11 +77,7 @@ const loginUser = async (email, password, role) => {
     await generateOTPForUser(user, normalizedEmail);
     return {
       message: 'OTP sent to your email',
-      user: {
-        email: normalizedEmail,
-        role: user.role,
-        name: user.name
-      }
+      user: buildAuthUserPayload(user),
     };
   }
 
@@ -91,13 +88,7 @@ const loginUser = async (email, password, role) => {
   );
   return {
     token,
-    user: {
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-      profileImage: user.profileImage,
-    },
+    user: buildAuthUserPayload(user),
   };
 };
 
@@ -147,13 +138,7 @@ const verifyUserOTP = async (email, otp) => {
     );
     return {
       token,
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        name: user.name,
-        profileImage: user.profileImage,
-      },
+      user: buildAuthUserPayload(user),
     };
   } catch (error) {
     throw error;

@@ -170,7 +170,18 @@ const buildAutomaticDetails = ({ req, statusCode, clientPath }) => {
   }
 
   const bodyKeys = req.body && typeof req.body === 'object'
-    ? Object.keys(req.body).filter((key) => !['password', 'otp', 'token'].includes(String(key).toLowerCase()))
+    ? Object.keys(req.body).filter(
+        (key) =>
+          ![
+            'password',
+            'otp',
+            'token',
+            'secretkey',
+            'confirmsecretkey',
+            'secretkeytoken',
+            'passwordresetotp',
+          ].includes(String(key).replace(/[^a-z]/gi, '').toLowerCase())
+      )
     : [];
   if (bodyKeys.length) {
     parts.push(`Body keys: ${bodyKeys.slice(0, 10).join(', ')}`);

@@ -4,6 +4,11 @@ const clerk = require('../config/clerk');
 const User = require('../models/user.model');
 const jwt = require('jsonwebtoken');
 const { createActivityLogEntry } = require('../services/activityLog.service');
+const {
+  buildAuthUserPayload,
+  requestPasswordResetOTP,
+  resetPasswordWithOTP,
+} = require('../services/accountSecurity.service');
 
 const classifyAuthStatus = (error) => {
   if (error?.statusCode) {
@@ -123,13 +128,7 @@ exports.clerkLogin = async (req, res) => {
 
     const authPayload = {
       token: jwtToken,
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        name: user.name,
-        profileImage: user.profileImage,
-      },
+      user: buildAuthUserPayload(user),
     };
 
     await logSuccessfulLogin(req, authPayload.user, 'Successful Clerk login');
@@ -169,15 +168,46 @@ exports.registerAdmin = async (req, res) => {
     
     res.status(201).json({ 
       message: 'Admin user created successfully',
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        name: user.name
-      }
+      user: buildAuthUserPayload(user),
     });
   } catch (error) {
     console.error('Register admin error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+exports.requestForgotPasswordOTP = async (req, res) => {
+  const { email, role } = req.body || {};
+
+  try {
+    const result = await requestPasswordResetOTP(email, role);
+    res.json(result);
+  } catch (error) {
+    console.error('[auth] request forgot password OTP error:', {
+      code: error?.code || null,
+      statusCode: error?.statusCode || null,
+      message: error?.message || 'Server error',
+    });
+    res.status(classifyAuthStatus(error)).json({
+      code: error?.code || 'FORGOT_PASSWORD_OTP_FAILED',
+      message: error?.message || 'Failed to send forgot password OTP',
+    });
+  }
+};
+
+exports.resetForgottenPassword = async (req, res) => {
+  try {
+    const result = await resetPasswordWithOTP(req.body || {});
+    res.json(result);
+  } catch (error) {
+    console.error('[auth] forgot password reset error:', {
+      code: error?.code || null,
+      statusCode: error?.statusCode || null,
+      message: error?.message || 'Server error',
+    });
+    res.status(classifyAuthStatus(error)).json({
+      code: error?.code || 'FORGOT_PASSWORD_RESET_FAILED',
+      message: error?.message || 'Failed to reset password',
+    });
   }
 };
