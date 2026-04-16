@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const meController = require('../controllers/me.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
+const { requireSecretKeyVerification } = require('../middlewares/auth.middleware');
 const roleMiddleware = require('../middlewares/role.middleware');
 
 router.get('/', authMiddleware, meController.getMe);
@@ -33,12 +34,14 @@ router.get(
   '/darya-notepad',
   authMiddleware,
   roleMiddleware(['creator', 'admin', 'superadmin']),
+  requireSecretKeyVerification,
   meController.getAdminNotepadOverview
 );
 router.get(
   '/darya-notepad/:pageNumber',
   authMiddleware,
   roleMiddleware(['creator', 'admin', 'superadmin']),
+  requireSecretKeyVerification,
   meController.getAdminNotepadPage
 );
 router.put(

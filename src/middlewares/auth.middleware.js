@@ -7,6 +7,48 @@ const { verifySecretKeySessionToken } = require('../services/accountSecurity.ser
 const EDIT_PROTECTED_METHODS = new Set(['PUT', 'PATCH', 'DELETE']);
 const SECRET_KEY_ELIGIBLE_ROLES = new Set(['creator', 'admin', 'superadmin']);
 
+const validateSecretKeyAccess = async (req, res) => {
+  if (!SECRET_KEY_ELIGIBLE_ROLES.has(req.user?.role)) {
+    return true;
+  }
+
+  const currentUser = await User.findById(req.user.id);
+
+  if (!currentUser) {
+    res.status(401).json({ message: 'User not found' });
+    return false;
+  }
+
+  if (!currentUser.secretKeyHash) {
+    res.status(428).json({
+      code: 'SECRET_KEY_SETUP_REQUIRED',
+      message: 'Create your secret key first before opening Darya pages or editing dashboard content.',
+    });
+    return false;
+  }
+
+  const secretKeyToken = req.header('X-Secret-Key-Token');
+  if (!secretKeyToken) {
+    res.status(403).json({
+      code: 'SECRET_KEY_REQUIRED',
+      message: 'Verify your secret key first before opening this protected admin page.',
+    });
+    return false;
+  }
+
+  try {
+    verifySecretKeySessionToken(secretKeyToken, req.user.id);
+  } catch (error) {
+    res.status(error?.statusCode || 403).json({
+      code: error?.code || 'INVALID_SECRET_KEY',
+      message: error?.message || 'Secret key verification failed.',
+    });
+    return false;
+  }
+
+  return true;
+};
+
 const authMiddleware = async (req, res, next) => {
   const token = req.header('Authorization');
   if (!token) {
@@ -22,35 +64,10 @@ const authMiddleware = async (req, res, next) => {
     };
 
     const method = String(req.method || '').toUpperCase();
-    if (EDIT_PROTECTED_METHODS.has(method) && SECRET_KEY_ELIGIBLE_ROLES.has(req.user.role)) {
-      const currentUser = await User.findById(req.user.id);
-
-      if (!currentUser) {
-        return res.status(401).json({ message: 'User not found' });
-      }
-
-      if (!currentUser.secretKeyHash) {
-        return res.status(428).json({
-          code: 'SECRET_KEY_SETUP_REQUIRED',
-          message: 'Create your secret key first before editing dashboard content.',
-        });
-      }
-
-      const secretKeyToken = req.header('X-Secret-Key-Token');
-      if (!secretKeyToken) {
-        return res.status(403).json({
-          code: 'SECRET_KEY_REQUIRED',
-          message: 'Secret key verification is required before editing.',
-        });
-      }
-
-      try {
-        verifySecretKeySessionToken(secretKeyToken, req.user.id);
-      } catch (error) {
-        return res.status(error?.statusCode || 403).json({
-          code: error?.code || 'INVALID_SECRET_KEY',
-          message: error?.message || 'Secret key verification failed.',
-        });
+    if (EDIT_PROTECTED_METHODS.has(method)) {
+      const isAllowed = await validateSecretKeyAccess(req, res);
+      if (!isAllowed) {
+        return;
       }
     }
 
@@ -61,4 +78,14 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+const requireSecretKeyVerification = async (req, res, next) => {
+  const isAllowed = await validateSecretKeyAccess(req, res);
+  if (!isAllowed) {
+    return;
+  }
+
+  next();
+};
+
 module.exports = authMiddleware;
+module.exports.requireSecretKeyVerification = requireSecretKeyVerification;
