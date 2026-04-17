@@ -239,6 +239,8 @@ const buildSectionPayload = ({
     .sort((left, right) => safeText(left.name).localeCompare(safeText(right.name), 'en', { sensitivity: 'base' }))
     .map((player) => ({
       id: player._id,
+      profileId: safeText(player.masterId || player.playerId || player._id),
+      profilePath: `/players/${encodeURIComponent(safeText(player.masterId || player.playerId || player._id))}`,
       name: safeText(player.name, 'Player'),
       branch: safeText(player.branch),
       kpmNo: safeText(player.kpmNo),
