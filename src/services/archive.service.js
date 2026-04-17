@@ -429,6 +429,7 @@ const getArchivePayload = async (requestedYear) => {
     },
     sections,
     links: {
+      players: '/players',
       results: `/results?year=${selectedYear}`,
       winners: '/winners',
       pointsTable: '/points-table',

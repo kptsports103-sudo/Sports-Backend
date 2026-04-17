@@ -220,6 +220,150 @@ const pickHeroImage = (...collections) => {
   return '';
 };
 
+const toBoundedInteger = (value, fallback, { min = 1, max = 100 } = {}) => {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isInteger(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, parsed));
+};
+
+const buildPlayerDirectoryEntries = (players = []) => {
+  const groups = new Map();
+
+  (players || []).forEach((player) => {
+    const key = safeText(player?.masterId || player?.playerId || player?._id || player?.id);
+    if (!key) {
+      return;
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+
+    groups.get(key).push(player);
+  });
+
+  return Array.from(groups.entries())
+    .map(([key, rows]) => {
+      const sortedRows = [...rows].sort(compareByLatestYear);
+      const latest = sortedRows[0] || {};
+      const activeYears = Array.from(new Set(sortedRows.map((entry) => toNumberYear(entry?.year)).filter(Boolean)))
+        .sort((left, right) => right - left);
+      const branches = Array.from(
+        new Set(sortedRows.map((entry) => safeText(entry?.branch)).filter(Boolean))
+      );
+
+      return {
+        id: key,
+        masterId: key,
+        name: safeText(latest?.name, 'Player'),
+        branch: safeText(latest?.branch || branches[0]),
+        branches,
+        kpmNo: safeText(latest?.kpmNo),
+        semester: safeText(latest?.semester),
+        currentDiplomaYear: latest?.currentDiplomaYear || latest?.baseDiplomaYear || null,
+        firstParticipationYear: latest?.firstParticipationYear || activeYears[activeYears.length - 1] || null,
+        latestYear: activeYears[0] || null,
+        activeYears,
+        seasonCount: sortedRows.length,
+        status: safeText(latest?.status, 'ACTIVE'),
+        profilePath: `/players/${encodeURIComponent(key)}`,
+      };
+    })
+    .sort((left, right) =>
+      safeText(left.name).localeCompare(safeText(right.name), 'en', { sensitivity: 'base' }) ||
+      (toNumberYear(right.latestYear) || 0) - (toNumberYear(left.latestYear) || 0)
+    );
+};
+
+const getPlayerDirectoryPayload = async (query = {}) => {
+  const players = await Player.find().lean();
+  const entries = buildPlayerDirectoryEntries(players);
+
+  const normalizedSearch = normalizeText(query?.search);
+  const selectedYear = toNumberYear(query?.year);
+  const selectedBranch = normalizeText(query?.branch);
+  const selectedStatus = safeText(query?.status).toUpperCase();
+  const page = toBoundedInteger(query?.page, 1, { min: 1, max: 10000 });
+  const limit = toBoundedInteger(query?.limit, 12, { min: 1, max: 48 });
+
+  const availableYears = Array.from(
+    new Set(entries.flatMap((entry) => entry.activeYears || []).filter(Boolean))
+  ).sort((left, right) => right - left);
+
+  const availableBranches = Array.from(
+    new Set(entries.flatMap((entry) => entry.branches || []).map((value) => safeText(value)).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right, 'en', { sensitivity: 'base' }));
+
+  const availableStatuses = Array.from(
+    new Set(entries.map((entry) => safeText(entry.status).toUpperCase()).filter(Boolean))
+  ).sort();
+
+  const filteredEntries = entries.filter((entry) => {
+    if (normalizedSearch) {
+      const searchableFields = [
+        normalizeText(entry.name),
+        normalizeText(entry.branch),
+        normalizeText(entry.kpmNo),
+        ...safeArray(entry.branches).map(normalizeText),
+      ].filter(Boolean);
+
+      if (!searchableFields.some((field) => field.includes(normalizedSearch))) {
+        return false;
+      }
+    }
+
+    if (selectedYear && !safeArray(entry.activeYears).includes(selectedYear)) {
+      return false;
+    }
+
+    if (selectedBranch) {
+      const branches = safeArray(entry.branches).map(normalizeText);
+      if (!branches.includes(selectedBranch)) {
+        return false;
+      }
+    }
+
+    if (selectedStatus && safeText(entry.status).toUpperCase() !== selectedStatus) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const totalItems = filteredEntries.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * limit;
+  const items = filteredEntries.slice(offset, offset + limit);
+
+  return {
+    items,
+    filters: {
+      search: safeText(query?.search),
+      year: selectedYear,
+      branch: safeText(query?.branch),
+      status: selectedStatus,
+      availableYears,
+      availableBranches,
+      availableStatuses,
+    },
+    pagination: {
+      page: safePage,
+      limit,
+      totalItems,
+      totalPages,
+      hasNextPage: safePage < totalPages,
+      hasPreviousPage: safePage > 1,
+    },
+    links: {
+      archive: '/archive',
+    },
+  };
+};
+
 const getPlayerProfilePayload = async (requestedId) => {
   const [
     players,
@@ -432,6 +576,7 @@ const getPlayerProfilePayload = async (requestedId) => {
       })),
     },
     links: {
+      directory: '/players',
       archive: activeYears[0] ? buildArchivePath(activeYears[0]) : '/archive',
       archiveYears: activeYears.map((year) => ({
         year,
@@ -445,5 +590,6 @@ const getPlayerProfilePayload = async (requestedId) => {
 };
 
 module.exports = {
+  getPlayerDirectoryPayload,
   getPlayerProfilePayload,
 };

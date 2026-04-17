@@ -37,6 +37,7 @@ const CLIENT_PAGE_LABELS = [
   [/^\/sports-dashboard$/, 'Sports Dashboard'],
   [/^\/verify\/.+$/, 'Certificate Verification'],
   [/^\/archive(?:\/\d{4})?$/, 'Sports Archive'],
+  [/^\/players$/, 'Players Directory'],
   [/^\/players\/[^/]+$/, 'Player Profile'],
   [/^\/results$/, 'Results'],
   [/^\/gallery$/, 'Gallery'],

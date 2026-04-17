@@ -1,4 +1,16 @@
-const { getPlayerProfilePayload } = require('../services/playerProfile.service');
+const { getPlayerDirectoryPayload, getPlayerProfilePayload } = require('../services/playerProfile.service');
+
+const getPlayerDirectory = async (req, res) => {
+  try {
+    const payload = await getPlayerDirectoryPayload(req.query);
+    return res.json(payload);
+  } catch (error) {
+    console.error('Error fetching player directory:', error);
+    return res.status(500).json({
+      message: 'Failed to load player directory.',
+    });
+  }
+};
 
 const getPlayerProfile = async (req, res) => {
   try {
@@ -20,5 +32,6 @@ const getPlayerProfile = async (req, res) => {
 };
 
 module.exports = {
+  getPlayerDirectory,
   getPlayerProfile,
 };
