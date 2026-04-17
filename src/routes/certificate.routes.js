@@ -10,7 +10,7 @@ const {
 const { generateCertificatePDF } = require('../services/pdfService');
 
 router.get('/verify/:id', verifyCertificate);
-router.get('/', authMiddleware, roleMiddleware(['admin', 'superadmin']), listIssuedCertificates);
+router.get('/', authMiddleware, roleMiddleware(['creator', 'admin', 'superadmin']), listIssuedCertificates);
 router.post('/issue', authMiddleware, roleMiddleware(['admin', 'superadmin']), issueCertificate);
 router.post('/save', authMiddleware, roleMiddleware(['admin', 'superadmin']), issueCertificate);
 

@@ -14,6 +14,7 @@ const AUTO_LOG_SKIP_PREFIXES = [
 const CLIENT_PAGE_LABELS = [
   [/^\/admin\/super-admin-dashboard$/, 'Super Admin Dashboard'],
   [/^\/admin\/dashboard$/, 'Admin Dashboard'],
+  [/^\/admin\/creator-darya-notepad$/, 'Creator Darya Notepad'],
   [/^\/admin\/creator-dashboard$/, 'Creator Dashboard'],
   [/^\/dashboard\/coach$/, 'Coach Dashboard'],
   [/^\/admin\/iam\/users$/, 'IAM Users'],
