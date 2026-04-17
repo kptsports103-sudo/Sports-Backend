@@ -4,13 +4,12 @@ const Result = require('../models/result.model');
 const GroupResult = require('../models/groupResult.model');
 const KpmPool = require('../models/kpmPool.model');
 const multer = require('multer');
-const { createObjectId, isValidObjectId } = require('../../lib/objectId');
 const {
-  assignGlobalKpms,
-  syncKpmPoolFromDocs,
   parseKpmSequence,
   MAX_KPM_SEQUENCE
 } = require('../services/kpmSequence.service');
+const { mapPlayersToGroupedResponse } = require('../services/playerRoster.service');
+const { submitPlayerChangeRequest } = require('../services/playerApproval.service');
 const { storeUploadedBuffer } = require('../services/hybridStorage.service');
 const { getHistoryTimelineTotal, normalizeHistoryTimeline } = require('../utils/historyTimeline');
 
@@ -51,24 +50,6 @@ const deriveAchievementSettings = (home) => {
     sportsMeetsConducted: getSportsMeetsConductedValue(home?.timeline),
     yearsOfExcellence: getYearsOfExcellenceValue(home?.timeline),
   };
-};
-
-const ensureUniquePlayerMasterIds = (players = []) => {
-  const usedYearMasterIds = new Set();
-
-  return (players || []).map((player) => {
-    const safePlayer = { ...player };
-    const safeYear = Number(safePlayer?.year || 0);
-    let safeMasterId = String(safePlayer?.masterId || '').trim() || createObjectId();
-
-    while (usedYearMasterIds.has(`${safeYear}|${safeMasterId}`)) {
-      safeMasterId = createObjectId();
-    }
-
-    usedYearMasterIds.add(`${safeYear}|${safeMasterId}`);
-    safePlayer.masterId = safeMasterId;
-    return safePlayer;
-  });
 };
 
 const getAchievementDisplayYear = async () => {
@@ -154,55 +135,6 @@ const buildHomeAchievements = (settings, metrics) => ([
     mode: 'auto',
   },
 ]);
-
-const normalizePlayerKeyPart = (value) =>
-  String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
-const buildYearPlayerProfileKey = (player) => {
-  const year = String(player?.year || '').trim();
-  const name = normalizePlayerKeyPart(player?.name);
-  const branch = normalizePlayerKeyPart(player?.branch);
-  const diplomaYear = String(player?.currentDiplomaYear || player?.baseDiplomaYear || player?.diplomaYear || '').trim();
-  const semester = String(player?.semester || '1').trim();
-  const status = String(player?.status || 'ACTIVE').trim().toUpperCase();
-  const kpmNo = String(player?.kpmNo || '').trim().toUpperCase();
-  const fallbackId = String(player?.playerId || player?._id || player?.masterId || '').trim();
-
-  return [year, name, branch, diplomaYear, semester, status, kpmNo || fallbackId].join('|');
-};
-
-const mapPlayersToGroupedResponse = (players, options = {}) => {
-  const { dedupeProfiles = true } = options;
-  const seenByYear = {};
-
-  return (players || []).reduce((acc, player) => {
-    if (!acc[player.year]) acc[player.year] = [];
-    if (dedupeProfiles) {
-      if (!seenByYear[player.year]) seenByYear[player.year] = new Set();
-
-      const profileKey = buildYearPlayerProfileKey(player);
-      if (profileKey && seenByYear[player.year].has(profileKey)) {
-        return acc;
-      }
-
-      if (profileKey) {
-        seenByYear[player.year].add(profileKey);
-      }
-    }
-
-    acc[player.year].push({
-      id: player.playerId || String(player._id),
-      masterId: player.masterId || '',
-      name: player.name,
-      branch: player.branch,
-      diplomaYear: player.currentDiplomaYear || player.baseDiplomaYear || null,
-      semester: player.semester || '1',
-      status: player.status || 'ACTIVE',
-      kpmNo: player.kpmNo || ''
-    });
-    return acc;
-  }, {});
-};
 
 exports.uploadBanner = [
   upload.single('banner'),
@@ -508,79 +440,18 @@ exports.getKpmPoolStatus = async (req, res) => {
 
 exports.savePlayers = async (req, res) => {
   try {
-    const { data } = req.body; // data is array of {year, players: []}
-    if (!Array.isArray(data)) {
-      return res.status(400).json({ message: 'Invalid payload. Expected data: [{ year, players: [] }].' });
-    }
+    const request = await submitPlayerChangeRequest({
+      data: req.body?.data,
+      user: req.user,
+      requestNote: req.body?.requestNote,
+    });
 
-    const coachId = req.user?.id;
-    if (!coachId || !isValidObjectId(coachId)) {
-      return res.status(401).json({ message: 'Invalid authentication user.' });
-    }
-
-    // Build and validate docs before deleting current data.
-    const docs = [];
-    for (const yearData of data) {
-      const year = Number(yearData?.year);
-      if (!year || !Array.isArray(yearData?.players)) continue;
-
-      for (const player of yearData.players) {
-        const name = (player?.name || '').trim();
-        const branch = (player?.branch || '').trim();
-        if (!name || !branch) continue;
-
-        const parsedDiplomaYear = Number(player?.diplomaYear);
-        const safeDiplomaYear = [1, 2, 3].includes(parsedDiplomaYear) ? parsedDiplomaYear : 1;
-        const parsedSemester = String(player?.semester || '1').trim();
-        const safeSemester = ['1', '2', '3', '4', '5', '6'].includes(parsedSemester) ? parsedSemester : '1';
-        const parsedStatus = String(player?.status || 'ACTIVE').trim().toUpperCase();
-        const safeStatus = ['ACTIVE', 'COMPLETED', 'DROPPED'].includes(parsedStatus) ? parsedStatus : 'ACTIVE';
-        const safeKpmNo = String(player?.kpmNo || '').trim();
-        const safeMasterId = String(player?.masterId || createObjectId()).trim();
-        const playerId = String(player?.id || player?.playerId || createObjectId());
-
-        docs.push({
-          name,
-          playerId,
-          masterId: safeMasterId,
-          branch,
-          kpmNo: safeKpmNo,
-          firstParticipationYear: year,
-          baseDiplomaYear: safeDiplomaYear,
-          currentDiplomaYear: safeDiplomaYear,
-          semester: safeSemester,
-          status: safeStatus,
-          year,
-          coachId
-        });
-      }
-    }
-
-    if (docs.length === 0) {
-      return res.status(400).json({ message: 'No valid players to save.' });
-    }
-
-    // Backend-owned enterprise KPM policy:
-    // - sequence suffix is globally unique across ACTIVE players
-    // - current capacity is 001-999, while legacy 2-digit KPMs are still recognized
-    // - released automatically when status is COMPLETED/DROPPED (derived via availability)
-    const normalizedDocs = assignGlobalKpms(ensureUniquePlayerMasterIds(docs).map((doc) => ({
-      ...doc,
-      playerId: String(doc.playerId || createObjectId()),
-      masterId: String(doc.masterId || createObjectId()).trim(),
-    })));
-
-    // Clear existing and save new set.
-    await Player.deleteMany({});
-    const savedPlayers = await Player.insertMany(normalizedDocs);
-    await syncKpmPoolFromDocs(normalizedDocs);
-
-    return res.json({
-      message: 'Players saved successfully',
-      players: mapPlayersToGroupedResponse(savedPlayers)
+    return res.status(202).json({
+      message: 'Player changes submitted for approval successfully.',
+      request,
     });
   } catch (error) {
     console.error('Error saving players:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(error?.statusCode || 500).json({ message: error?.message || 'Server error' });
   }
 };

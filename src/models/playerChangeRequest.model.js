@@ -1,0 +1,41 @@
+const { createMySQLModel } = require('../../lib/mysqlDocumentModel');
+
+module.exports = createMySQLModel('PlayerChangeRequest', {
+  collectionName: 'player_change_requests',
+  timestamps: true,
+  indexes: [['status'], ['requestedById'], ['reviewedById']],
+  fieldTypes: {
+    requestNote: 'text',
+    reviewNote: 'text',
+    reviewedAt: 'date',
+    appliedAt: 'date',
+    appliedPlayerCount: 'integer',
+  },
+  defaults: {
+    requestedById: '',
+    requestedByName: '',
+    requestedByEmail: '',
+    requestedByRole: 'creator',
+    status: 'PENDING',
+    submissionType: 'FULL_SNAPSHOT',
+    payload: [],
+    summary: {
+      totalYears: 0,
+      totalPlayers: 0,
+      activePlayers: 0,
+      completedPlayers: 0,
+      droppedPlayers: 0,
+      yearBreakdown: [],
+      branchBreakdown: [],
+      samplePlayers: [],
+    },
+    requestNote: '',
+    reviewNote: '',
+    reviewedById: '',
+    reviewedByName: '',
+    reviewedByEmail: '',
+    reviewedAt: null,
+    appliedAt: null,
+    appliedPlayerCount: 0,
+  },
+});

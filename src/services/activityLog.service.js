@@ -52,6 +52,7 @@ const API_PAGE_LABELS = [
   [/^\/api\/v1\/iam\b/, 'IAM Users'],
   [/^\/api\/v1\/home\b/, 'Home Page'],
   [/^\/api\/v1\/archive\b/, 'Sports Archive'],
+  [/^\/api\/v1\/players\/approval-requests\b/, 'Player Approvals'],
   [/^\/api\/v1\/players\b/, 'Player Profile'],
   [/^\/api\/v1\/me\b/, 'Profile'],
   [/^\/api\/v1\/events\b/, 'Events'],

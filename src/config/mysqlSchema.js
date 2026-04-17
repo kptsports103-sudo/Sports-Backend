@@ -11,6 +11,7 @@ const MediaActivity = require('../models/mediaActivity.model');
 const MediaItem = require('../models/mediaItem.model');
 const OTP = require('../models/otp.model');
 const Player = require('../models/player.model');
+const PlayerChangeRequest = require('../models/playerChangeRequest.model');
 const Registration = require('../models/registration.model');
 const Result = require('../models/result.model');
 const StudentParticipation = require('../models/studentParticipation.model');
@@ -34,6 +35,7 @@ const runtimeModels = [
   MediaItem,
   OTP,
   Player,
+  PlayerChangeRequest,
   Registration,
   Result,
   StudentParticipation,
