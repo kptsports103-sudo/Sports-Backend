@@ -400,6 +400,7 @@ const getResultsBoard = async ({ year, level } = {}) => {
   await ensureResultsBoardProjection();
 
   const normalizedLevel = normalizeResultLevel(level);
+  const isAllYearRequest = String(year || '').trim().toLowerCase() === 'all';
 
   const [yearRows] = await pool.query(
     `
@@ -415,7 +416,7 @@ const getResultsBoard = async ({ year, level } = {}) => {
     .map((row) => toNumberYear(row?.year))
     .filter(Boolean);
 
-  const selectedYear = resolveSelectedYear(year, availableYears);
+  const selectedYear = resolveSelectedYear(isAllYearRequest ? null : year, availableYears);
 
   if (!selectedYear) {
     return {
@@ -426,6 +427,15 @@ const getResultsBoard = async ({ year, level } = {}) => {
       groupResults: [],
     };
   }
+
+  const individualYearFilter = isAllYearRequest ? '' : 'AND e.year = ?';
+  const groupYearFilter = isAllYearRequest ? '' : 'AND e.year = ?';
+  const individualQueryParams = isAllYearRequest
+    ? [normalizedLevel]
+    : [normalizedLevel, selectedYear];
+  const groupQueryParams = isAllYearRequest
+    ? [normalizedLevel]
+    : [normalizedLevel, selectedYear];
 
   const [individualRows, groupRows] = await Promise.all([
     pool.query(
@@ -447,14 +457,15 @@ const getResultsBoard = async ({ year, level } = {}) => {
         WHERE
           e.source_type = 'individual'
           AND e.level = ?
-          AND e.year = ?
+          ${individualYearFilter}
           AND p.participation_role = 'individual'
         ORDER BY
+          e.year DESC,
           a.name ASC,
           e.event_name ASC,
           e.sort_order ASC
       `,
-      [normalizedLevel, selectedYear]
+      individualQueryParams
     ),
     pool.query(
       `
@@ -477,13 +488,14 @@ const getResultsBoard = async ({ year, level } = {}) => {
         WHERE
           e.source_type = 'group'
           AND e.level = ?
-          AND e.year = ?
+          ${groupYearFilter}
         ORDER BY
+          e.year DESC,
           e.team_name ASC,
           e.event_name ASC,
           p.participation_order ASC
       `,
-      [normalizedLevel, selectedYear]
+      groupQueryParams
     ),
   ]);
 
