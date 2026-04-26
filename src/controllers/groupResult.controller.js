@@ -1,5 +1,6 @@
 const GroupResult = require('../models/groupResult.model');
 const { deleteStoredFile, storeUploadedBuffer } = require('../services/hybridStorage.service');
+const { ensureResultsBoardProjection } = require('../services/resultsBoard.service');
 const { normalizeResultLevel } = require('../utils/resultLevels');
 const { ensureResultLevelStorage } = require('../utils/resultStorageMigration');
 
@@ -79,6 +80,9 @@ const createGroupResult = async (req, res) => {
     }
     const groupResult = new GroupResult(data);
     await groupResult.save();
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after group create:', projectionError);
+    });
     res.status(201).json(groupResult);
   } catch (error) {
     console.error('Create group result error:', error);
@@ -167,6 +171,9 @@ const updateGroupResult = async (req, res) => {
       await deleteStoredFile(previousImagePublicId);
     }
 
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after group update:', projectionError);
+    });
     res.json(groupResult);
   } catch (error) {
     console.error('Update group result error:', error);
@@ -183,6 +190,9 @@ const deleteGroupResult = async (req, res) => {
     }
 
     await deleteStoredFile(groupResult.imagePublicId);
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after group delete:', projectionError);
+    });
     res.json({ message: 'Group result deleted' });
   } catch (error) {
     console.error('Delete group result error:', error);

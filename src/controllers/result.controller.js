@@ -1,6 +1,10 @@
 const Result = require('../models/result.model');
 const Player = require('../models/player.model');
 const { deleteStoredFile, storeUploadedBuffer } = require('../services/hybridStorage.service');
+const {
+  ensureResultsBoardProjection,
+  getResultsBoard,
+} = require('../services/resultsBoard.service');
 const { normalizeResultLevel } = require('../utils/resultLevels');
 const { ensureResultLevelStorage } = require('../utils/resultStorageMigration');
 
@@ -106,6 +110,9 @@ exports.createResult = async (req, res) => {
     });
 
     await result.save();
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after create:', projectionError);
+    });
     res.status(201).json(result);
   } catch (error) {
     console.error('Create result error:', error);
@@ -117,6 +124,20 @@ exports.createResult = async (req, res) => {
         message: 'Result already exists for this player in this event and level.'
       });
     }
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+exports.getResultsBoard = async (req, res) => {
+  try {
+    const board = await getResultsBoard({
+      year: req.query?.year,
+      level: req.query?.level,
+    });
+
+    res.json(board);
+  } catch (error) {
+    console.error('Get results board error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -271,6 +292,9 @@ exports.updateResult = async (req, res) => {
       await deleteStoredFile(previousImagePublicId);
     }
 
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after update:', projectionError);
+    });
     res.json(result);
   } catch (error) {
     console.error('Update result error:', error);
@@ -295,6 +319,9 @@ exports.deleteResult = async (req, res) => {
     }
 
     await deleteStoredFile(result.imagePublicId);
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after delete:', projectionError);
+    });
     res.json({ message: 'Result deleted' });
   } catch (error) {
     console.error('Delete result error:', error);
@@ -314,6 +341,9 @@ exports.reorderResults = async (req, res) => {
     }));
 
     await Result.bulkWrite(bulk);
+    await ensureResultsBoardProjection({ force: true }).catch((projectionError) => {
+      console.error('Results board projection sync failed after reorder:', projectionError);
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('Reorder error:', error);
