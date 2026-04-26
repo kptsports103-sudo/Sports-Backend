@@ -447,6 +447,11 @@ const getResultsBoard = async ({ year, level } = {}) => {
           e.event_name,
           e.medal,
           e.image_url,
+          e.source_created_at,
+          e.source_updated_at,
+          a.player_master_id,
+          a.player_id,
+          a.diploma_year,
           a.name,
           a.branch
         FROM \`${RESULT_EVENT_TABLE}\` e
@@ -477,9 +482,14 @@ const getResultsBoard = async ({ year, level } = {}) => {
           e.team_name,
           e.medal,
           e.image_url,
+          e.source_created_at,
+          e.source_updated_at,
           p.participation_order,
           a.name AS member_name,
-          a.branch AS member_branch
+          a.branch AS member_branch,
+          a.player_master_id AS member_master_id,
+          a.player_id AS member_player_id,
+          a.diploma_year AS member_diploma_year
         FROM \`${RESULT_EVENT_TABLE}\` e
         LEFT JOIN \`${RESULT_PARTICIPATION_TABLE}\` p
           ON p.result_event_id = e.id
@@ -501,13 +511,18 @@ const getResultsBoard = async ({ year, level } = {}) => {
 
   const individualResults = (individualRows[0] || []).map((row) => ({
     _id: cleanText(row.source_id),
+    playerMasterId: cleanText(row.player_master_id),
+    playerId: cleanText(row.player_id),
     name: cleanText(row.name),
     branch: cleanText(row.branch),
+    diplomaYear: toOptionalInt(row.diploma_year),
     event: cleanText(row.event_name),
     year: toNumberYear(row.year),
     level: normalizeResultLevel(row.level),
     medal: cleanText(row.medal) || 'Participation',
     imageUrl: cleanText(row.image_url),
+    createdAt: toDateValue(row.source_created_at)?.toISOString() || '',
+    updatedAt: toDateValue(row.source_updated_at)?.toISOString() || '',
   }));
 
   const groupResultsMap = new Map();
@@ -522,6 +537,8 @@ const getResultsBoard = async ({ year, level } = {}) => {
         level: normalizeResultLevel(row.level),
         medal: cleanText(row.medal) || 'Participation',
         imageUrl: cleanText(row.image_url),
+        createdAt: toDateValue(row.source_created_at)?.toISOString() || '',
+        updatedAt: toDateValue(row.source_updated_at)?.toISOString() || '',
         members: [],
       });
     }
@@ -534,6 +551,9 @@ const getResultsBoard = async ({ year, level } = {}) => {
       entry.members.push({
         name: memberName,
         branch: memberBranch,
+        playerMasterId: cleanText(row.member_master_id),
+        playerId: cleanText(row.member_player_id),
+        diplomaYear: toOptionalInt(row.member_diploma_year),
       });
     }
   });
