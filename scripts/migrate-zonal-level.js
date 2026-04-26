@@ -1,21 +1,3 @@
-/**
- * ⚠️ LOCAL-ONLY MIGRATION SCRIPT
- *
- * Purpose:
- *  - One-time migration to convert 'zonal' level to 'national' in Results and GroupResults
- *  - This fixes the issue where Zonal (South Zone) results don't appear in the UI
- *
- * How to run:
- *  - Start backend locally
- *  - Run: node scripts/migrate-zonal-level.js
- *
- * ❌ DO NOT:
- *  - Import this file anywhere
- *  - Run during deployment
- *  - Run on Vercel / serverless
- *
- * ✅ This script is for MANUAL execution only.
- */
 
 const mongoose = require('mongoose');
 const Result = require('../src/models/result.model');
