@@ -19,6 +19,8 @@ const firstNonEmpty = (...values) => {
   return '';
 };
 
+const normalizeEmailPassword = (value) => String(value || '').replace(/\s+/g, '').trim();
+
 const toBoolean = (value, fallback = false) => {
   if (value === undefined || value === null || String(value).trim() === '') {
     return fallback;
@@ -66,7 +68,7 @@ const toSafeTransportSummary = (transport) => ({
 
 const getMailConfig = () => {
   const user = firstNonEmpty(process.env.EMAIL_USER, process.env.SMTP_USER);
-  const pass = firstNonEmpty(process.env.EMAIL_PASS, process.env.SMTP_PASS);
+  const pass = normalizeEmailPassword(firstNonEmpty(process.env.EMAIL_PASS, process.env.SMTP_PASS));
   const service = firstNonEmpty(process.env.EMAIL_SERVICE, process.env.SMTP_SERVICE);
   const host = firstNonEmpty(process.env.EMAIL_HOST, process.env.SMTP_HOST) || DEFAULT_SMTP_HOST;
   const port = toNumber(firstNonEmpty(process.env.EMAIL_PORT, process.env.SMTP_PORT), DEFAULT_SMTP_PORT);
@@ -135,11 +137,14 @@ const getMailConfig = () => {
 const getMailDiagnostics = () => {
   const { from, transports } = getMailConfig();
   const primaryTransport = transports[0] || {};
+  const rawPass = firstNonEmpty(process.env.EMAIL_PASS, process.env.SMTP_PASS);
+  const sanitizedPass = normalizeEmailPassword(rawPass);
 
   return {
     fromConfigured: Boolean(String(from || '').trim()),
     emailUserConfigured: Boolean(primaryTransport?.auth?.user),
     emailPassConfigured: Boolean(primaryTransport?.auth?.pass),
+    emailPassHasWhitespace: Boolean(rawPass && rawPass !== sanitizedPass),
     transportCount: transports.length,
     transports: transports.map(toSafeTransportSummary),
   };
@@ -170,7 +175,7 @@ const classifyOtpEmailError = (error) => {
     message.includes('authentication failed')
   ) {
     return createServiceError(
-      'SMTP authentication failed. Check EMAIL_PASS and Gmail App Password settings.',
+      'SMTP authentication failed. Check EMAIL_PASS, remove spaces, and use a Gmail App Password.',
       'EMAIL_AUTH_FAILED',
       503,
       300

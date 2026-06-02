@@ -45,9 +45,9 @@ const classifyEmailFailure = (error) => {
     return {
       status: 'invalid',
       code: 'EMAIL_AUTH_FAILED',
-      message: 'SMTP authentication failed. EMAIL_PASS is probably wrong or Gmail App Passwords are not enabled.',
+      message: 'SMTP authentication failed. EMAIL_PASS is probably wrong, contains spaces, or Gmail App Passwords are not enabled.',
       recommendation:
-        'Use a Gmail App Password, not the Gmail account password, and make sure 2-Step Verification is enabled.',
+        'Use a Gmail App Password, make sure 2-Step Verification is enabled, and remove any spaces from EMAIL_PASS.',
     };
   }
 
@@ -82,6 +82,17 @@ const verifyEmailOtpConfig = async () => {
     diagnostics,
     attempts: [],
   };
+
+  if (diagnostics.emailPassHasWhitespace) {
+    report.warnings = [
+      buildIssue(
+        'email',
+        'EMAIL_PASS_WHITESPACE',
+        'EMAIL_PASS contains whitespace and was normalized before SMTP auth.',
+        'warning'
+      ),
+    ];
+  }
 
   const emailUser = firstNonEmpty(process.env.EMAIL_USER, process.env.SMTP_USER);
   const emailPass = firstNonEmpty(process.env.EMAIL_PASS, process.env.SMTP_PASS);
@@ -137,7 +148,7 @@ const summarizeReport = (report) => {
   const status = emailReady ? 'ok' : 'unavailable';
 
   const issues = [];
-  const warnings = [];
+  const warnings = [...(report.email?.warnings || [])];
 
   for (const provider of [report.email]) {
     if (!provider) {

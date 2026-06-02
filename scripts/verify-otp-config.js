@@ -33,6 +33,12 @@ const printProvider = (report) => {
   if (report.details?.accountFriendlyName) {
     console.log(`  Account: ${report.details.accountFriendlyName}`);
   }
+
+  if (report.warnings?.length) {
+    for (const warning of report.warnings) {
+      console.log(`  Warn: ${warning.message}`);
+    }
+  }
 };
 
 const main = async () => {
@@ -48,6 +54,16 @@ const main = async () => {
 
   console.log('');
   printProvider(report.email);
+
+  if (report.warnings?.length) {
+    console.log('');
+    for (const warning of report.warnings) {
+      console.log(`WARN ${warning.provider}: ${warning.message}`);
+      if (warning.code) {
+        console.log(`  Code: ${warning.code}`);
+      }
+    }
+  }
 
   console.log('');
   console.log(JSON.stringify(report, null, 2));
