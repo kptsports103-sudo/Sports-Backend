@@ -50,6 +50,15 @@ const buildTransportLabel = (transport) => {
   return `${hostLabel}:${transport.port} secure=${transport.secure ? 'true' : 'false'}`;
 };
 
+const toSafeTransportSummary = (transport) => ({
+  service: transport.service || null,
+  host: transport.host || null,
+  port: transport.port || null,
+  secure: Boolean(transport.secure),
+  requireTLS: Boolean(transport.requireTLS),
+  family: transport.family || null,
+});
+
 const getMailConfig = () => {
   const user = firstNonEmpty(process.env.EMAIL_USER, process.env.SMTP_USER);
   const pass = firstNonEmpty(process.env.EMAIL_PASS, process.env.SMTP_PASS);
@@ -115,6 +124,19 @@ const getMailConfig = () => {
   };
 };
 
+const getMailDiagnostics = () => {
+  const { from, transports } = getMailConfig();
+  const primaryTransport = transports[0] || {};
+
+  return {
+    fromConfigured: Boolean(String(from || '').trim()),
+    emailUserConfigured: Boolean(primaryTransport?.auth?.user),
+    emailPassConfigured: Boolean(primaryTransport?.auth?.pass),
+    transportCount: transports.length,
+    transports: transports.map(toSafeTransportSummary),
+  };
+};
+
 const createServiceError = (message, code = 'EMAIL_SERVICE_UNAVAILABLE', statusCode = 503) => {
   const error = new Error(message);
   error.code = code;
@@ -163,6 +185,7 @@ const sendMailWithRetry = async (mailOptions, maxAttempts = 2) => {
 
 const sendOTP = async (email, otp) => {
   if (!hasRequiredEmailConfig()) {
+    console.error('OTP email config missing:', getMailDiagnostics());
     throw createServiceError('OTP email service is not configured', 'EMAIL_NOT_CONFIGURED');
   }
 
@@ -196,6 +219,7 @@ const sendOTP = async (email, otp) => {
       responseCode: error?.responseCode || null,
       command: error?.command || null,
       transport: error?.transportLabel || null,
+      diagnostics: getMailDiagnostics(),
       message: error?.message || 'Unknown email error',
     });
 
@@ -209,5 +233,8 @@ const sendOTP = async (email, otp) => {
 };
 
 module.exports = {
+  getMailConfig,
+  getMailDiagnostics,
+  hasRequiredEmailConfig,
   sendOTP,
 };
