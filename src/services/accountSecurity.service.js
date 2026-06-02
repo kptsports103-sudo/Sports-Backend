@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 
 const User = require('../models/user.model');
 const otpService = require('./otp.service');
-const emailService = require('./email.service');
+const { sendOTPWithFallback } = require('./otpDelivery.service');
 const { hashPassword } = require('../utils/password.util');
 const { normalizeRole } = require('../utils/roles');
 
@@ -84,6 +84,22 @@ const findSingleUserByEmail = async (email, role) => {
     throw createSecurityError(`No ${role} account found for ${normalizedEmail}.`, 404, 'ROLE_MISMATCH');
   }
 
+  if (!role) {
+    const passwordCapableUsers = matchedUsers.filter((candidate) => isPasswordHash(candidate.password));
+
+    if (passwordCapableUsers.length === 1) {
+      return passwordCapableUsers[0];
+    }
+
+    if (passwordCapableUsers.length > 1) {
+      throw createSecurityError(
+        'Multiple accounts are linked to this email. Please select the correct role.',
+        400,
+        'MULTIPLE_ACCOUNTS'
+      );
+    }
+  }
+
   if (matchedUsers.length > 1) {
     throw createSecurityError(
       'Multiple accounts are linked to this email. Please select the correct role.',
@@ -151,17 +167,38 @@ const requestSecretKeySetupOTP = async (userId) => {
 
   const otp = otpService.generateOTP();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+  const hasPhone = Boolean(String(user.phone || '').trim());
 
   await User.findByIdAndUpdate(user._id, {
     secretKeyOtp: otp,
     secretKeyOtpExpiresAt: expiresAt,
   });
 
-  await emailService.sendOTP(user.email, otp);
+  try {
+    const delivery = await sendOTPWithFallback({
+      email: user.email,
+      phone: hasPhone ? user.phone : undefined,
+      otp,
+      allowSmsFallback: hasPhone,
+      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
+    });
 
-  return {
-    message: 'OTP sent to your email.',
-  };
+    return {
+      message: delivery.channel === 'sms' ? 'OTP sent to your mobile number.' : 'OTP sent to your email.',
+      deliveryChannel: delivery.channel,
+    };
+  } catch (error) {
+    try {
+      await User.findByIdAndUpdate(user._id, {
+        secretKeyOtp: null,
+        secretKeyOtpExpiresAt: null,
+      });
+    } catch (cleanupError) {
+      console.warn('[account-security] Failed to clear undelivered secret-key OTP:', cleanupError.message);
+    }
+
+    throw error;
+  }
 };
 
 const verifySecretKeySetupOTP = async (userId, otp, secretKey, confirmSecretKey) => {
@@ -252,17 +289,38 @@ const requestPasswordResetOTP = async (email, role) => {
 
   const otp = otpService.generateOTP();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+  const hasPhone = Boolean(String(user.phone || '').trim());
 
   await User.findByIdAndUpdate(user._id, {
     passwordResetOtp: otp,
     passwordResetOtpExpiresAt: expiresAt,
   });
 
-  await emailService.sendOTP(user.email, otp);
+  try {
+    const delivery = await sendOTPWithFallback({
+      email: user.email,
+      phone: hasPhone ? user.phone : undefined,
+      otp,
+      allowSmsFallback: hasPhone,
+      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
+    });
 
-  return {
-    message: 'OTP sent to your email.',
-  };
+    return {
+      message: delivery.channel === 'sms' ? 'OTP sent to your mobile number.' : 'OTP sent to your email.',
+      deliveryChannel: delivery.channel,
+    };
+  } catch (error) {
+    try {
+      await User.findByIdAndUpdate(user._id, {
+        passwordResetOtp: null,
+        passwordResetOtpExpiresAt: null,
+      });
+    } catch (cleanupError) {
+      console.warn('[account-security] Failed to clear undelivered password-reset OTP:', cleanupError.message);
+    }
+
+    throw error;
+  }
 };
 
 const resetPasswordWithOTP = async ({ email, otp, newPassword, role }) => {

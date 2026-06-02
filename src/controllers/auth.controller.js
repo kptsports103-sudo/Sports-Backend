@@ -34,6 +34,7 @@ const SERVICE_UNAVAILABLE_ERROR_CODES = new Set([
   'SMS_NOT_CONFIGURED',
   'SMS_DELIVERY_FAILED',
   'SMS_PROVIDER_REJECTED',
+  'EAUTH',
 ]);
 
 const classifyAuthStatus = (error) => {
@@ -137,15 +138,16 @@ exports.login = async (req, res) => {
 };
 
 exports.verifyOTP = async (req, res) => {
-  const { email, otp } = req.body;
+  const { email, otp, role } = req.body;
   console.log('[auth] verify OTP request:', {
     email: String(email || '').trim().toLowerCase(),
+    role: role || null,
     hasOtp: Boolean(otp),
     contentType: req.get('Content-Type'),
   });
   
   try {
-    const result = await verifyUserOTP(email, otp);
+    const result = await verifyUserOTP(email, otp, role);
     await logSuccessfulLogin(req, result?.user, 'Successful OTP login');
     res.json(result);
   } catch (error) {
