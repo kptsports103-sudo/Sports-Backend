@@ -1,6 +1,11 @@
 require('dotenv').config();
 
+const path = require('path');
 const nodemailer = require('nodemailer');
+
+require('dotenv').config({
+  path: path.resolve(__dirname, '..', '.env'),
+});
 
 const {
   getMailConfig,
