@@ -29,6 +29,7 @@ const adminActivityLogRoutes = require('./routes/adminActivityLog.routes');
 const mediaRoutes = require('./routes/media.routes');
 const metricsRoutes = require('./routes/metrics.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
+const { verifyOtpEnvironment } = require('./services/otpDiagnostics.service');
 
 const errorMiddleware = require('./middlewares/error.middleware');
 
@@ -59,6 +60,16 @@ const sendServiceUnavailable = (res, error, fallbackMessage = 'Database unavaila
 };
 
 const trimTrailingSlash = (value = '') => String(value || '').trim().replace(/\/+$/, '');
+const firstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+};
+
+const OTP_HEALTH_TOKEN = firstNonEmpty(process.env.OTP_HEALTH_TOKEN, process.env.HEALTH_CHECK_TOKEN);
 
 const defaultAllowedOrigins = [
   'http://localhost:5173',
@@ -113,7 +124,15 @@ const corsOptions = {
     return callback(null, false);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Accept', 'Authorization', 'Content-Type', 'X-Client-Path', 'X-Secret-Key-Token'],
+  allowedHeaders: [
+    'Accept',
+    'Authorization',
+    'Content-Type',
+    'X-Client-Path',
+    'X-Secret-Key-Token',
+    'X-OTP-Health-Token',
+    'X-Health-Token',
+  ],
   credentials: true,
   optionsSuccessStatus: 204,
 };
@@ -187,6 +206,53 @@ app.get('/health/db', async (req, res) => {
     });
   }
 });
+
+const getOtpHealthToken = (req) => {
+  const headerToken = firstNonEmpty(
+    req.headers['x-otp-health-token'],
+    req.headers['x-health-token']
+  );
+  const authHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authHeader.replace(/^Bearer\s+/i, '');
+
+  return firstNonEmpty(headerToken, bearerToken, req.query.token);
+};
+
+const requireOtpHealthToken = (req, res, next) => {
+  if (!OTP_HEALTH_TOKEN) {
+    return res.status(503).json({
+      code: 'OTP_HEALTH_TOKEN_MISSING',
+      message: 'OTP health endpoint is not configured.',
+      retryAfter: 60,
+    });
+  }
+
+  const providedToken = getOtpHealthToken(req);
+  if (!providedToken || providedToken !== OTP_HEALTH_TOKEN) {
+    return res.status(401).json({
+      code: 'OTP_HEALTH_UNAUTHORIZED',
+      message: 'Invalid OTP health token.',
+    });
+  }
+
+  return next();
+};
+
+const handleOtpHealthCheck = async (req, res) => {
+  try {
+    const report = await verifyOtpEnvironment();
+    res.status(report.ok ? 200 : 503).json(report);
+  } catch (error) {
+    console.error('OTP health check failed:', error);
+    res.status(500).json({
+      code: error?.code || 'OTP_HEALTH_CHECK_FAILED',
+      message: error?.message || 'OTP health check failed.',
+    });
+  }
+};
+
+app.get('/health/otp', requireOtpHealthToken, handleOtpHealthCheck);
+app.get('/api/health/otp', requireOtpHealthToken, handleOtpHealthCheck);
 
 // Suppress favicon 404s
 app.get('/favicon.ico', (_, res) => res.status(204).end());
