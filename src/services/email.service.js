@@ -3,13 +3,11 @@ const nodemailer = require('nodemailer');
 const DEFAULT_SMTP_HOST = 'smtp.gmail.com';
 const DEFAULT_SMTP_PORT = 465;
 const DEFAULT_SMTP_FALLBACK_PORT = 587;
-const DEFAULT_SMTP_CONNECTION_TIMEOUT = 3500;
-const DEFAULT_SMTP_GREETING_TIMEOUT = 3500;
-const DEFAULT_SMTP_SOCKET_TIMEOUT = 4500;
-const DEFAULT_SMTP_TOTAL_TIMEOUT = 5000;
-const SERVERLESS_RUNTIME = Boolean(
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY
-);
+const DEFAULT_SMTP_CONNECTION_TIMEOUT = 3000;
+const DEFAULT_SMTP_GREETING_TIMEOUT = 3000;
+const DEFAULT_SMTP_SOCKET_TIMEOUT = 4000;
+const DEFAULT_SMTP_TOTAL_TIMEOUT = 9000;
+const SERVERLESS_RUNTIME = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY);
 const RETRYABLE_ERROR_CODES = new Set(['ECONNRESET', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EPIPE']);
 
 const firstNonEmpty = (...values) => {
@@ -110,29 +108,20 @@ const getMailConfig = () => {
   ];
 
   if (usingGmail && (!explicitPort || !explicitSecure)) {
-    if (SERVERLESS_RUNTIME) {
-      transports[0] = {
+    transports.push(
+      {
+        ...commonTransport,
+        port: DEFAULT_SMTP_PORT,
+        secure: true,
+        requireTLS: false,
+      },
+      {
         ...commonTransport,
         port: DEFAULT_SMTP_FALLBACK_PORT,
         secure: false,
         requireTLS: true,
-      };
-    } else {
-      transports.push(
-        {
-          ...commonTransport,
-          port: DEFAULT_SMTP_PORT,
-          secure: true,
-          requireTLS: false,
-        },
-        {
-          ...commonTransport,
-          port: DEFAULT_SMTP_FALLBACK_PORT,
-          secure: false,
-          requireTLS: true,
-        }
-      );
-    }
+      }
+    );
   }
 
   return {
