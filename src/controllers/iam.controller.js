@@ -2,8 +2,8 @@ const User = require('../models/user.model');
 const bcrypt = require('bcryptjs');
 const otpService = require('../services/otp.service');
 const { normalizeRole } = require('../utils/roleMapper');
-const emailService = require('../services/email.service');
 const smsService = require('../services/sms.service');
+const { sendOTPWithFallback } = require('../services/otpDelivery.service');
 const { randomUUID } = require('crypto');
 const jwt = require('jsonwebtoken');
 const { normalizeRole: normalizeAccessRole } = require('../utils/roles');
@@ -230,8 +230,9 @@ const createUser = async (req, res) => {
     }
     
     // Generic error
-    res.status(500).json({ 
-      message: 'Internal server error',
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'CREATE_USER_FAILED',
+      message: error?.message || 'Internal server error',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -317,7 +318,10 @@ const resendOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('Resend OTP error:', error);
-    res.status(400).json({ message: error.message || 'Failed to resend OTP' });
+    res.status(error?.statusCode || 400).json({
+      code: error?.code || 'RESEND_OTP_FAILED',
+      message: error.message || 'Failed to resend OTP'
+    });
   }
 };
 
@@ -436,16 +440,24 @@ const sendOTPOnboarding = async (req, res) => {
       expiresAt: otpExpiresAt
     };
 
-    // Send OTP via Email
-    await emailService.sendOTP(normalizedEmail, otp);
+    // Deliver OTP via email first, then SMS if the invitation carries a phone number.
+    await sendOTPWithFallback({
+      email: normalizedEmail,
+      phone: access.tokenData?.phone || null,
+      otp,
+      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
+    });
 
     res.json({
-      message: 'OTP sent successfully to email address',
+      message: 'OTP sent successfully to your registered contact.',
       expiresIn: '5 minutes'
     });
   } catch (error) {
     console.error('Send OTP onboarding error:', error);
-    res.status(500).json({ message: 'Failed to send OTP' });
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'SEND_OTP_ONBOARDING_FAILED',
+      message: error?.message || 'Failed to send OTP'
+    });
   }
 };
 
@@ -783,8 +795,9 @@ const createUserOnboarding = async (req, res) => {
       });
     }
 
-    res.status(500).json({
-      message: 'Failed to create account',
+    res.status(error?.statusCode || 500).json({
+      code: error?.code || 'CREATE_USER_ONBOARDING_FAILED',
+      message: error?.message || 'Failed to create account',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
