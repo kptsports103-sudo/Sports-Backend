@@ -111,6 +111,7 @@ async function generateOTPForUser(user, email) {
     const wrappedError = new Error(error?.message || 'Failed to generate and send OTP');
     wrappedError.statusCode = error?.statusCode || 503;
     wrappedError.code = error?.code || 'OTP_DELIVERY_FAILED';
+    wrappedError.retryAfter = error?.retryAfter || 30;
     throw wrappedError;
   }
 }

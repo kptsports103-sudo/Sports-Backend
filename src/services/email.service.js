@@ -3,6 +3,13 @@ const nodemailer = require('nodemailer');
 const DEFAULT_SMTP_HOST = 'smtp.gmail.com';
 const DEFAULT_SMTP_PORT = 465;
 const DEFAULT_SMTP_FALLBACK_PORT = 587;
+const DEFAULT_SMTP_CONNECTION_TIMEOUT = 3500;
+const DEFAULT_SMTP_GREETING_TIMEOUT = 3500;
+const DEFAULT_SMTP_SOCKET_TIMEOUT = 4500;
+const DEFAULT_SMTP_TOTAL_TIMEOUT = 5000;
+const SERVERLESS_RUNTIME = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY
+);
 const RETRYABLE_ERROR_CODES = new Set(['ECONNRESET', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EPIPE']);
 
 const firstNonEmpty = (...values) => {
@@ -79,9 +86,12 @@ const getMailConfig = () => {
     host,
     auth: user && pass ? { user, pass } : undefined,
     pool: false,
-    connectionTimeout: toNumber(process.env.EMAIL_CONNECTION_TIMEOUT, 5000),
-    greetingTimeout: toNumber(process.env.EMAIL_GREETING_TIMEOUT, 5000),
-    socketTimeout: toNumber(process.env.EMAIL_SOCKET_TIMEOUT, 7000),
+    connectionTimeout: toNumber(
+      process.env.EMAIL_CONNECTION_TIMEOUT,
+      DEFAULT_SMTP_CONNECTION_TIMEOUT
+    ),
+    greetingTimeout: toNumber(process.env.EMAIL_GREETING_TIMEOUT, DEFAULT_SMTP_GREETING_TIMEOUT),
+    socketTimeout: toNumber(process.env.EMAIL_SOCKET_TIMEOUT, DEFAULT_SMTP_SOCKET_TIMEOUT),
     family: ipFamily === 6 ? 6 : 4,
     requireTLS: !secure,
     tls: {
@@ -100,20 +110,29 @@ const getMailConfig = () => {
   ];
 
   if (usingGmail && (!explicitPort || !explicitSecure)) {
-    transports.push(
-      {
-        ...commonTransport,
-        port: DEFAULT_SMTP_PORT,
-        secure: true,
-        requireTLS: false,
-      },
-      {
+    if (SERVERLESS_RUNTIME) {
+      transports[0] = {
         ...commonTransport,
         port: DEFAULT_SMTP_FALLBACK_PORT,
         secure: false,
         requireTLS: true,
-      }
-    );
+      };
+    } else {
+      transports.push(
+        {
+          ...commonTransport,
+          port: DEFAULT_SMTP_PORT,
+          secure: true,
+          requireTLS: false,
+        },
+        {
+          ...commonTransport,
+          port: DEFAULT_SMTP_FALLBACK_PORT,
+          secure: false,
+          requireTLS: true,
+        }
+      );
+    }
   }
 
   return {
@@ -137,10 +156,16 @@ const getMailDiagnostics = () => {
   };
 };
 
-const createServiceError = (message, code = 'EMAIL_SERVICE_UNAVAILABLE', statusCode = 503) => {
+const createServiceError = (
+  message,
+  code = 'EMAIL_SERVICE_UNAVAILABLE',
+  statusCode = 503,
+  retryAfter = 30
+) => {
   const error = new Error(message);
   error.code = code;
   error.statusCode = statusCode;
+  error.retryAfter = retryAfter;
   return error;
 };
 
@@ -158,10 +183,27 @@ const shouldRetry = (error) => {
   return /ECONNRESET|socket hang up|timed out|greeting never received/i.test(message);
 };
 
+const runWithTimeout = (promise, timeoutMs, timeoutFactory) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(timeoutFactory());
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+
 const sendMailWithRetry = async (mailOptions, maxAttempts = 2) => {
   let lastError = null;
   const { transports } = getMailConfig();
-  const perTransportAttempts = transports.length > 1 ? 1 : maxAttempts;
+  const perTransportAttempts = SERVERLESS_RUNTIME || transports.length > 1 ? 1 : maxAttempts;
 
   for (const transport of transports) {
     for (let attempt = 1; attempt <= perTransportAttempts; attempt += 1) {
@@ -186,7 +228,7 @@ const sendMailWithRetry = async (mailOptions, maxAttempts = 2) => {
 const sendOTP = async (email, otp) => {
   if (!hasRequiredEmailConfig()) {
     console.error('OTP email config missing:', getMailDiagnostics());
-    throw createServiceError('OTP email service is not configured', 'EMAIL_NOT_CONFIGURED');
+    throw createServiceError('OTP email service is not configured', 'EMAIL_NOT_CONFIGURED', 503, 60);
   }
 
   const { from } = getMailConfig();
@@ -210,7 +252,21 @@ const sendOTP = async (email, otp) => {
       `,
     };
 
-    const result = await sendMailWithRetry(mailOptions);
+    const totalTimeout = toNumber(
+      process.env.EMAIL_TOTAL_TIMEOUT,
+      SERVERLESS_RUNTIME ? DEFAULT_SMTP_TOTAL_TIMEOUT : 8000
+    );
+    const result = await runWithTimeout(
+      sendMailWithRetry(mailOptions),
+      totalTimeout,
+      () =>
+        createServiceError(
+          'OTP delivery is taking too long. Please try again in a moment.',
+          'EMAIL_SEND_TIMEOUT',
+          503,
+          30
+        )
+    );
     console.log(`OTP email sent to ${email}; messageId=${result.messageId}`);
     return result;
   } catch (error) {
@@ -225,9 +281,12 @@ const sendOTP = async (email, otp) => {
 
     const wrapped = createServiceError(
       'OTP delivery is temporarily unavailable. Please try again in a minute.',
-      error?.code || 'EMAIL_SEND_FAILED'
+      error?.code || 'EMAIL_SEND_FAILED',
+      error?.statusCode || 503,
+      error?.retryAfter || 30
     );
     wrapped.cause = error;
+    wrapped.retryAfter = error?.retryAfter || 30;
     throw wrapped;
   }
 };

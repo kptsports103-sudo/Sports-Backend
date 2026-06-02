@@ -11,16 +11,77 @@ const {
   resetPasswordWithOTP,
 } = require('../services/accountSecurity.service');
 
+const SERVICE_UNAVAILABLE_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNECTION',
+  'ESOCKET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'PROTOCOL_CONNECTION_LOST',
+  'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
+  'ER_ACCESS_DENIED_ERROR',
+  'ER_BAD_DB_ERROR',
+  'MYSQL_CONFIG_MISSING',
+  'MYSQL_UNAVAILABLE',
+  'SERVICE_UNAVAILABLE',
+  'EMAIL_NOT_CONFIGURED',
+  'EMAIL_SEND_FAILED',
+  'EMAIL_SEND_TIMEOUT',
+  'OTP_DELIVERY_FAILED',
+]);
+
 const classifyAuthStatus = (error) => {
   if (error?.statusCode) {
     return error.statusCode;
   }
 
-  if (['ECONNRESET', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EPIPE', 'EMAIL_SEND_FAILED'].includes(error?.code)) {
+  if (SERVICE_UNAVAILABLE_ERROR_CODES.has(String(error?.code || '').trim().toUpperCase())) {
+    return 503;
+  }
+
+  if (['ECONNRESET', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EPIPE'].includes(error?.code)) {
+    return 503;
+  }
+
+  const message = String(error?.message || '').toLowerCase();
+  if (
+    message.includes('database unavailable') ||
+    message.includes('email service is not configured') ||
+    message.includes('otp delivery is taking too long') ||
+    message.includes('otp delivery is temporarily unavailable') ||
+    message.includes('connection refused') ||
+    message.includes('timed out')
+  ) {
     return 503;
   }
 
   return 400;
+};
+
+const sendAuthError = (res, error, fallbackMessage = 'Server error') => {
+  const statusCode = classifyAuthStatus(error);
+  const retryAfter = Number(error?.retryAfter || (statusCode === 503 ? 30 : 0));
+
+  if (statusCode === 503 && Number.isFinite(retryAfter) && retryAfter > 0) {
+    res.set('Retry-After', String(retryAfter));
+  }
+
+  const payload = {
+    message: error?.message || fallbackMessage,
+  };
+
+  if (error?.code) {
+    payload.code = error.code;
+  }
+
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    payload.retryAfter = retryAfter;
+  }
+
+  return res.status(statusCode).json(payload);
 };
 
 const logSuccessfulLogin = async (req, user, details = 'Successful login') => {
@@ -68,7 +129,7 @@ exports.login = async (req, res) => {
       statusCode: error?.statusCode || null,
       message: error?.message || 'Server error',
     });
-    res.status(classifyAuthStatus(error)).json({ message: error.message || 'Server error' });
+    sendAuthError(res, error);
   }
 };
 
@@ -90,7 +151,7 @@ exports.verifyOTP = async (req, res) => {
       statusCode: error?.statusCode || null,
       message: error?.message || 'Server error',
     });
-    res.status(classifyAuthStatus(error)).json({ message: error.message || 'Server error' });
+    sendAuthError(res, error);
   }
 };
 
@@ -192,10 +253,7 @@ exports.requestForgotPasswordOTP = async (req, res) => {
       statusCode: error?.statusCode || null,
       message: error?.message || 'Server error',
     });
-    res.status(classifyAuthStatus(error)).json({
-      code: error?.code || 'FORGOT_PASSWORD_OTP_FAILED',
-      message: error?.message || 'Failed to send forgot password OTP',
-    });
+    sendAuthError(res, error, 'Failed to send forgot password OTP');
   }
 };
 
@@ -209,9 +267,6 @@ exports.resetForgottenPassword = async (req, res) => {
       statusCode: error?.statusCode || null,
       message: error?.message || 'Server error',
     });
-    res.status(classifyAuthStatus(error)).json({
-      code: error?.code || 'FORGOT_PASSWORD_RESET_FAILED',
-      message: error?.message || 'Failed to reset password',
-    });
+    sendAuthError(res, error, 'Failed to reset password');
   }
 };

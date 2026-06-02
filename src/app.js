@@ -44,6 +44,20 @@ const summarizeDbError = (error) => ({
   message: error?.message || 'Unknown database error',
 });
 
+const sendServiceUnavailable = (res, error, fallbackMessage = 'Database unavailable', extra = {}) => {
+  const retryAfter = Number(error?.retryAfter || 5);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    res.set('Retry-After', String(retryAfter));
+  }
+
+  return res.status(503).json({
+    error: error?.code || 'SERVICE_UNAVAILABLE',
+    message: error?.message || fallbackMessage,
+    retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 5,
+    ...extra,
+  });
+};
+
 const trimTrailingSlash = (value = '') => String(value || '').trim().replace(/\/+$/, '');
 
 const defaultAllowedOrigins = [
@@ -166,13 +180,10 @@ app.get('/health/db', async (req, res) => {
     });
   } catch (error) {
     console.error('DB health check failed:', summarizeDbError(error));
-    res.status(503).json({
+    sendServiceUnavailable(res, error, 'Database unavailable', {
       status: 'error',
       db: 'mysql',
-      message: 'Database unavailable',
-      code: error?.code || null,
-      error: error?.message || 'Unknown database error',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 });
@@ -193,11 +204,7 @@ app.use(dbGuardPaths, async (req, res, next) => {
     next();
   } catch (err) {
     console.error('MySQL readiness check failed:', summarizeDbError(err));
-    return res.status(503).json({
-      error: 'SERVICE_UNAVAILABLE',
-      message: 'Database unavailable',
-      retryAfter: 5
-    });
+    return sendServiceUnavailable(res, err, 'Database unavailable');
   }
 });
 

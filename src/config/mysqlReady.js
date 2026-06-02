@@ -1,5 +1,6 @@
 const { connectMySQL } = require('./mysql');
 const { initializeMySQLSchema } = require('./mysqlSchema');
+const { assertMySQLConnectionConfig } = require('./mysqlOptions');
 
 let readyPromise = null;
 const shouldInitializeSchema = /^(1|true|yes|on)$/i.test(
@@ -9,6 +10,7 @@ const shouldInitializeSchema = /^(1|true|yes|on)$/i.test(
 const ensureMySQLReady = async () => {
   if (!readyPromise) {
     readyPromise = (async () => {
+      assertMySQLConnectionConfig();
       await connectMySQL();
       if (shouldInitializeSchema) {
         await initializeMySQLSchema();
@@ -16,6 +18,15 @@ const ensureMySQLReady = async () => {
       return true;
     })().catch((error) => {
       readyPromise = null;
+      if (!error.statusCode) {
+        error.statusCode = 503;
+      }
+      if (!error.code) {
+        error.code = 'MYSQL_UNAVAILABLE';
+      }
+      if (!error.retryAfter) {
+        error.retryAfter = 5;
+      }
       throw error;
     });
   }

@@ -23,6 +23,23 @@ const toBoolean = (value, fallback = false) => {
   return /^(1|true|yes|on|required)$/i.test(String(value).trim());
 };
 
+const parseSslSetting = (value, fallback = false) => {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return fallback;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on', 'require', 'required', 'preferred', 'verify-ca', 'verify-full'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off', 'disable', 'disabled'].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+};
+
 const parseConnectionUrl = (value) => {
   if (!value || String(value).trim() === '') {
     return {};
@@ -40,7 +57,10 @@ const parseConnectionUrl = (value) => {
       user: parsed.username ? decodeURIComponent(parsed.username) : undefined,
       password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
       database: parsed.pathname ? parsed.pathname.replace(/^\/+/, '') || undefined : undefined,
-      ssl: toBoolean(parsed.searchParams.get('ssl') || parsed.searchParams.get('sslmode')),
+      ssl: parseSslSetting(
+        parsed.searchParams.get('sslmode'),
+        parseSslSetting(parsed.searchParams.get('ssl'))
+      ),
     };
   } catch (error) {
     console.warn('[mysql] invalid connection URL:', error.message);
@@ -61,7 +81,7 @@ const getMySQLConnectionConfig = () => {
     )
   );
 
-  const shouldUseSsl = toBoolean(
+  const shouldUseSsl = parseSslSetting(
     firstNonEmpty(process.env.MYSQL_SSL, process.env.DB_SSL),
     Boolean(urlConfig.ssl)
   );
@@ -97,6 +117,60 @@ const getMySQLConnectionConfig = () => {
   return config;
 };
 
+const getMySQLConnectionDiagnostics = () => {
+  const config = getMySQLConnectionConfig();
+  const hasUrl = Boolean(firstNonEmpty(process.env.MYSQL_URL, process.env.DATABASE_URL, process.env.DB_URL));
+
+  return {
+    hasUrl,
+    host: config.host || null,
+    port: config.port || null,
+    userConfigured: Boolean(config.user),
+    passwordConfigured: Boolean(config.password),
+    databaseConfigured: Boolean(config.database),
+    sslConfigured: Boolean(config.ssl),
+    connectTimeout: config.connectTimeout,
+  };
+};
+
+const assertMySQLConnectionConfig = () => {
+  const config = getMySQLConnectionConfig();
+  const diagnostics = getMySQLConnectionDiagnostics();
+  const missing = [];
+
+  if (!diagnostics.userConfigured) {
+    missing.push('MYSQL_USER/DB_USER');
+  }
+
+  if (!diagnostics.passwordConfigured) {
+    missing.push('MYSQL_PASSWORD/DB_PASSWORD/DB_PASS');
+  }
+
+  if (!diagnostics.databaseConfigured) {
+    missing.push('MYSQL_DATABASE/DB_NAME');
+  }
+
+  if (process.env.VERCEL) {
+    const host = String(config.host || '').trim().toLowerCase();
+    if (!host || host === 'localhost' || host === '127.0.0.1') {
+      missing.push('MYSQL_URL/DATABASE_URL/DB_URL');
+    }
+  }
+
+  if (!missing.length) {
+    return diagnostics;
+  }
+
+  const error = new Error(`MySQL configuration is incomplete. Missing: ${missing.join(', ')}`);
+  error.code = 'MYSQL_CONFIG_MISSING';
+  error.statusCode = 503;
+  error.retryAfter = 60;
+  error.diagnostics = diagnostics;
+  throw error;
+};
+
 module.exports = {
+  assertMySQLConnectionConfig,
+  getMySQLConnectionDiagnostics,
   getMySQLConnectionConfig,
 };
