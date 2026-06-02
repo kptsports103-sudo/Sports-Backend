@@ -158,6 +158,55 @@ const createServiceError = (
   return error;
 };
 
+const classifyOtpEmailError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  const responseCode = Number(error?.responseCode || error?.response?.status || 0);
+  const message = String(error?.message || '').toLowerCase();
+
+  if (
+    code === 'EAUTH' ||
+    responseCode === 535 ||
+    message.includes('username and password not accepted') ||
+    message.includes('authentication failed')
+  ) {
+    return createServiceError(
+      'SMTP authentication failed. Check EMAIL_PASS and Gmail App Password settings.',
+      'EMAIL_AUTH_FAILED',
+      503,
+      300
+    );
+  }
+
+  if (
+    ['ENOTFOUND', 'ESOCKET', 'ETIMEDOUT', 'ECONNECTION', 'ECONNRESET', 'EPIPE'].includes(code) ||
+    message.includes('greeting never received') ||
+    message.includes('socket hang up')
+  ) {
+    return createServiceError(
+      'SMTP host is unreachable or timing out. Check EMAIL_HOST, EMAIL_PORT, and network access.',
+      'EMAIL_SMTP_UNREACHABLE',
+      503,
+      60
+    );
+  }
+
+  if (code === 'EENVELOPE') {
+    return createServiceError(
+      'SMTP rejected the sender or recipient address. Check EMAIL_FROM and EMAIL_USER.',
+      'EMAIL_ENVELOPE_REJECTED',
+      503,
+      60
+    );
+  }
+
+  return createServiceError(
+    'OTP delivery is temporarily unavailable. Please try again in a minute.',
+    error?.code || 'EMAIL_SEND_FAILED',
+    error?.statusCode || 503,
+    error?.retryAfter || 30
+  );
+};
+
 const hasRequiredEmailConfig = () => {
   const { transports } = getMailConfig();
   return Boolean(transports?.[0]?.auth?.user && transports?.[0]?.auth?.pass);
@@ -268,14 +317,11 @@ const sendOTP = async (email, otp) => {
       message: error?.message || 'Unknown email error',
     });
 
-    const wrapped = createServiceError(
-      'OTP delivery is temporarily unavailable. Please try again in a minute.',
-      error?.code || 'EMAIL_SEND_FAILED',
-      error?.statusCode || 503,
-      error?.retryAfter || 30
-    );
+    const wrapped = classifyOtpEmailError(error);
     wrapped.cause = error;
     wrapped.retryAfter = error?.retryAfter || 30;
+    wrapped.transportLabel = error?.transportLabel || null;
+    wrapped.responseCode = error?.responseCode || null;
     throw wrapped;
   }
 };

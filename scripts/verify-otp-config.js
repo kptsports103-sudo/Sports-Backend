@@ -8,7 +8,7 @@ const { verifyOtpEnvironment } = require('../src/services/otpDiagnostics.service
 
 const printProvider = (report) => {
   const statusLabel = report.status.toUpperCase();
-  const prefix = report.status === 'ok' ? 'OK' : report.status === 'degraded' ? 'WARN' : 'ERR';
+  const prefix = report.status === 'ok' ? 'OK' : 'ERR';
   console.log(`${prefix} ${report.provider}: ${statusLabel} - ${report.message}`);
 
   if (report.missing?.length) {
@@ -48,8 +48,6 @@ const main = async () => {
 
   console.log('');
   printProvider(report.email);
-  printProvider(report.fast2sms);
-  printProvider(report.twilio);
 
   console.log('');
   console.log(JSON.stringify(report, null, 2));

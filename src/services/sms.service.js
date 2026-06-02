@@ -17,6 +17,61 @@ const createSmsError = (message, code = 'SMS_DELIVERY_FAILED', statusCode = 503,
   return error;
 };
 
+const classifySmsError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  const statusCode = Number(error?.response?.status || error?.statusCode || 0);
+  const message = String(error?.message || '').toLowerCase();
+
+  if (
+    code.startsWith('SMS_') ||
+    code === 'FAST2SMS_AUTH_FAILED' ||
+    code === 'FAST2SMS_KEY_DISABLED' ||
+    code === 'TWILIO_AUTH_FAILED' ||
+    code === 'TWILIO_ACCOUNT_NOT_FOUND'
+  ) {
+    return error;
+  }
+
+  if ([401, 403].includes(statusCode) || message.includes('auth') || message.includes('unauthorized')) {
+    return createSmsError(
+      'SMS provider authentication failed. Check FAST2SMS_API_KEY or Twilio credentials.',
+      'SMS_AUTH_FAILED',
+      503,
+      60
+    );
+  }
+
+  if (statusCode === 404) {
+    return createSmsError(
+      'SMS provider account was not found or is not accessible.',
+      'SMS_ACCOUNT_NOT_FOUND',
+      503,
+      60
+    );
+  }
+
+  if (
+    ['ECONNRESET', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN'].includes(code) ||
+    message.includes('socket hang up') ||
+    message.includes('timed out') ||
+    message.includes('network error')
+  ) {
+    return createSmsError(
+      'SMS provider is unreachable or timing out.',
+      'SMS_PROVIDER_UNREACHABLE',
+      503,
+      60
+    );
+  }
+
+  return createSmsError(
+    'Failed to send OTP via SMS',
+    error?.code || 'SMS_DELIVERY_FAILED',
+    error?.statusCode || 503,
+    error?.retryAfter || 30
+  );
+};
+
 // Fast2SMS Integration (preferred for Indian numbers)
 const sendOTP = async (phoneNumber, otp) => {
   try {
@@ -114,16 +169,9 @@ const sendOTP = async (phoneNumber, otp) => {
   } catch (error) {
     console.error('SMS sending error:', error.response?.data || error.message);
 
-    if (error.code && String(error.code).startsWith('SMS_')) {
-      throw error;
-    }
-
-    throw createSmsError(
-      'Failed to send OTP via SMS',
-      error?.code || 'SMS_DELIVERY_FAILED',
-      error?.statusCode || 503,
-      error?.retryAfter || 30
-    );
+    const wrapped = classifySmsError(error);
+    wrapped.cause = error;
+    throw wrapped;
   }
 };
 

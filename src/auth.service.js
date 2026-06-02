@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('./models/user.model');
 const otpService = require('./services/otp.service');
-const { sendOTPWithFallback } = require('./services/otpDelivery.service');
+const { sendOTPByEmail } = require('./services/otpDelivery.service');
 const { buildAuthUserPayload, ensureDashboardRevealName } = require('./services/accountSecurity.service');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
@@ -79,7 +79,7 @@ const loginUser = async (email, password, role) => {
     const delivery = await generateOTPForUser(user, normalizedEmail);
     return {
       requiresOTP: true,
-      message: delivery.channel === 'sms' ? 'OTP sent via SMS.' : 'OTP sent to your email.',
+      message: 'OTP sent to your email.',
       deliveryChannel: delivery.channel,
       user: buildAuthUserPayload(user),
     };
@@ -99,18 +99,14 @@ const loginUser = async (email, password, role) => {
 async function generateOTPForUser(user, email) {
   const otp = otpService.generateOTP();
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-  const hasPhone = Boolean(String(user?.phone || '').trim());
 
   await User.findOneAndUpdate({ _id: user._id }, { otp, otp_expires_at: expiresAt });
   console.log(`[auth] OTP created for email=${email} userId=${user._id}`);
 
   try {
-    const delivery = await sendOTPWithFallback({
+    const delivery = await sendOTPByEmail({
       email,
-      phone: hasPhone ? user.phone : undefined,
       otp,
-      allowSmsFallback: hasPhone,
-      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
     });
     console.log(`[auth] OTP delivery confirmed for email=${email} channel=${delivery.channel}`);
     return delivery;

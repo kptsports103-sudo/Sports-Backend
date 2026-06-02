@@ -2,7 +2,7 @@ const User = require('../models/user.model');
 const bcrypt = require('bcryptjs');
 const otpService = require('../services/otp.service');
 const { normalizeRole } = require('../utils/roleMapper');
-const { sendOTPWithFallback } = require('../services/otpDelivery.service');
+const { sendOTPByEmail } = require('../services/otpDelivery.service');
 const smsService = require('../services/sms.service');
 const { randomUUID } = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -434,7 +434,6 @@ const sendOTPOnboarding = async (req, res) => {
     const otp = otpService.generateOTP();
     const otpExpiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
     const stateKey = getOnboardingStateKey(normalizedEmail, access.hasValidInvitationToken ? token : null);
-    const hasInvitationPhone = Boolean(String(access.tokenData?.phone || '').trim());
 
     // Store OTP
     onboardingOTPs[stateKey] = {
@@ -443,16 +442,13 @@ const sendOTPOnboarding = async (req, res) => {
     };
 
     try {
-      const delivery = await sendOTPWithFallback({
+      const delivery = await sendOTPByEmail({
         email: normalizedEmail,
-        phone: hasInvitationPhone ? access.tokenData.phone : undefined,
         otp,
-        allowSmsFallback: hasInvitationPhone,
-        fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
       });
 
       res.json({
-        message: delivery.channel === 'sms' ? 'OTP sent successfully to mobile number.' : 'OTP sent successfully to email address.',
+        message: 'OTP sent successfully to email address.',
         expiresIn: '5 minutes',
         deliveryChannel: delivery.channel,
       });

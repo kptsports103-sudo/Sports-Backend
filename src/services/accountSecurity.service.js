@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 
 const User = require('../models/user.model');
 const otpService = require('./otp.service');
-const { sendOTPWithFallback } = require('./otpDelivery.service');
+const { sendOTPByEmail } = require('./otpDelivery.service');
 const { hashPassword } = require('../utils/password.util');
 const { normalizeRole } = require('../utils/roles');
 
@@ -167,7 +167,6 @@ const requestSecretKeySetupOTP = async (userId) => {
 
   const otp = otpService.generateOTP();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
-  const hasPhone = Boolean(String(user.phone || '').trim());
 
   await User.findByIdAndUpdate(user._id, {
     secretKeyOtp: otp,
@@ -175,16 +174,13 @@ const requestSecretKeySetupOTP = async (userId) => {
   });
 
   try {
-    const delivery = await sendOTPWithFallback({
+    const delivery = await sendOTPByEmail({
       email: user.email,
-      phone: hasPhone ? user.phone : undefined,
       otp,
-      allowSmsFallback: hasPhone,
-      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
     });
 
     return {
-      message: delivery.channel === 'sms' ? 'OTP sent to your mobile number.' : 'OTP sent to your email.',
+      message: 'OTP sent to your email.',
       deliveryChannel: delivery.channel,
     };
   } catch (error) {
@@ -289,7 +285,6 @@ const requestPasswordResetOTP = async (email, role) => {
 
   const otp = otpService.generateOTP();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
-  const hasPhone = Boolean(String(user.phone || '').trim());
 
   await User.findByIdAndUpdate(user._id, {
     passwordResetOtp: otp,
@@ -297,16 +292,13 @@ const requestPasswordResetOTP = async (email, role) => {
   });
 
   try {
-    const delivery = await sendOTPWithFallback({
+    const delivery = await sendOTPByEmail({
       email: user.email,
-      phone: hasPhone ? user.phone : undefined,
       otp,
-      allowSmsFallback: hasPhone,
-      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
     });
 
     return {
-      message: delivery.channel === 'sms' ? 'OTP sent to your mobile number.' : 'OTP sent to your email.',
+      message: 'OTP sent to your email.',
       deliveryChannel: delivery.channel,
     };
   } catch (error) {
