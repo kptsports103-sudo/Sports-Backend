@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('./models/user.model');
 const otpService = require('./services/otp.service');
-const { sendOTPWithFallback } = require('./services/otpDelivery.service');
+const emailService = require('./services/email.service');
 const { buildAuthUserPayload, ensureDashboardRevealName } = require('./services/accountSecurity.service');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
@@ -78,7 +78,7 @@ const loginUser = async (email, password, role) => {
   if (['superadmin', 'admin', 'creator'].includes(normalizedUserRole)) {
     await generateOTPForUser(user, normalizedEmail);
     return {
-      message: 'OTP sent to your registered contact.',
+      message: 'OTP sent to your email.',
       user: buildAuthUserPayload(user),
     };
   }
@@ -100,13 +100,8 @@ async function generateOTPForUser(user, email) {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
     await User.findOneAndUpdate({ _id: user._id }, { otp, otp_expires_at: expiresAt });
     console.log(`[auth] OTP created for email=${email} userId=${user._id}`);
-    const delivery = await sendOTPWithFallback({
-      email,
-      phone: user.phone,
-      otp,
-      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
-    });
-    console.log(`[auth] OTP delivery confirmed via ${delivery.channel} for email=${email}`);
+    await emailService.sendOTP(email, otp);
+    console.log(`[auth] OTP delivery confirmed for email=${email}`);
   } catch (error) {
     console.error('[auth] OTP generation/delivery failed:', {
       code: error?.code || null,

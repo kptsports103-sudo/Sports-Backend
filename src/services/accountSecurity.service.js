@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 
 const User = require('../models/user.model');
 const otpService = require('./otp.service');
-const { sendOTPWithFallback } = require('./otpDelivery.service');
+const emailService = require('./email.service');
 const { hashPassword } = require('../utils/password.util');
 const { normalizeRole } = require('../utils/roles');
 
@@ -157,15 +157,10 @@ const requestSecretKeySetupOTP = async (userId) => {
     secretKeyOtpExpiresAt: expiresAt,
   });
 
-  await sendOTPWithFallback({
-    email: user.email,
-    phone: user.phone,
-    otp,
-    fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
-  });
+  await emailService.sendOTP(user.email, otp);
 
   return {
-    message: 'OTP sent to your registered contact.',
+    message: 'OTP sent to your email.',
   };
 };
 
@@ -263,15 +258,10 @@ const requestPasswordResetOTP = async (email, role) => {
     passwordResetOtpExpiresAt: expiresAt,
   });
 
-  await sendOTPWithFallback({
-    email: user.email,
-    phone: user.phone,
-    otp,
-    fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
-  });
+  await emailService.sendOTP(user.email, otp);
 
   return {
-    message: 'OTP sent to your registered contact.',
+    message: 'OTP sent to your email.',
   };
 };
 

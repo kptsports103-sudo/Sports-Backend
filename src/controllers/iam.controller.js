@@ -2,8 +2,8 @@ const User = require('../models/user.model');
 const bcrypt = require('bcryptjs');
 const otpService = require('../services/otp.service');
 const { normalizeRole } = require('../utils/roleMapper');
+const emailService = require('../services/email.service');
 const smsService = require('../services/sms.service');
-const { sendOTPWithFallback } = require('../services/otpDelivery.service');
 const { randomUUID } = require('crypto');
 const jwt = require('jsonwebtoken');
 const { normalizeRole: normalizeAccessRole } = require('../utils/roles');
@@ -440,16 +440,10 @@ const sendOTPOnboarding = async (req, res) => {
       expiresAt: otpExpiresAt
     };
 
-    // Deliver OTP via email first, then SMS if the invitation carries a phone number.
-    await sendOTPWithFallback({
-      email: normalizedEmail,
-      phone: access.tokenData?.phone || null,
-      otp,
-      fallbackMessage: 'OTP delivery is temporarily unavailable. Please try again in a minute.',
-    });
+    await emailService.sendOTP(normalizedEmail, otp);
 
     res.json({
-      message: 'OTP sent successfully to your registered contact.',
+      message: 'OTP sent successfully to email address.',
       expiresIn: '5 minutes'
     });
   } catch (error) {
